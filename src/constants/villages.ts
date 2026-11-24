@@ -1,0 +1,140 @@
+/**
+ * Scalable Multi-Village Registry
+ * Supports N villages across clusters with dynamic location matching and neighbor distances.
+ */
+
+import { Village } from '../types/village';
+
+export const MULTI_VILLAGES_REGISTRY: Village[] = [
+  {
+    id: 'rampur',
+    name: 'Rampur',
+    hindiName: 'रामपुर',
+    district: 'Varanasi',
+    state: 'Uttar Pradesh',
+    postalCodes: ['221001', '221002'],
+    activeStoresCount: 18,
+    foodStoresCount: 10,
+    groceryStoresCount: 8,
+    isActive: true,
+    popularLandmarks: [
+      'Purani Basti',
+      'Kali Mandir Chowk',
+      'Panchayat Bhavan',
+      'Station Road',
+      'Bazaar Chauraha',
+    ],
+    neighbors: [
+      { villageId: 'madhopur', distanceKm: 2.5, interVillageFeePaise: 1500 },
+      { villageId: 'shivpur', distanceKm: 3.8, interVillageFeePaise: 2000 },
+      { villageId: 'kalyanpur', distanceKm: 5.2, interVillageFeePaise: 2500 },
+    ],
+  },
+  {
+    id: 'madhopur',
+    name: 'Madhopur',
+    hindiName: 'माधोपुर',
+    district: 'Varanasi',
+    state: 'Uttar Pradesh',
+    postalCodes: ['221003', '221004'],
+    activeStoresCount: 14,
+    foodStoresCount: 7,
+    groceryStoresCount: 7,
+    isActive: true,
+    popularLandmarks: [
+      'Naya Tola',
+      'Hanuman Mandir',
+      'Kisan Seva Kendra',
+      'Nahariya Pul',
+      'Hospital Mor',
+    ],
+    neighbors: [
+      { villageId: 'rampur', distanceKm: 2.5, interVillageFeePaise: 1500 },
+      { villageId: 'haridaspur', distanceKm: 3.1, interVillageFeePaise: 1800 },
+      { villageId: 'kalyanpur', distanceKm: 4.0, interVillageFeePaise: 2200 },
+    ],
+  },
+  {
+    id: 'shivpur',
+    name: 'Shivpur',
+    hindiName: 'शिवपुर',
+    district: 'Varanasi',
+    state: 'Uttar Pradesh',
+    postalCodes: ['221005'],
+    activeStoresCount: 12,
+    foodStoresCount: 6,
+    groceryStoresCount: 6,
+    isActive: true,
+    popularLandmarks: [
+      'Shiva Mandir Pokhra',
+      'Chhattra Basti',
+      'Purana Thana',
+      'Sabzi Mandi Gali',
+    ],
+    neighbors: [
+      { villageId: 'rampur', distanceKm: 3.8, interVillageFeePaise: 2000 },
+      { villageId: 'chandpur', distanceKm: 4.5, interVillageFeePaise: 2200 },
+    ],
+  },
+  {
+    id: 'kalyanpur',
+    name: 'Kalyanpur',
+    hindiName: 'कल्याणपुर',
+    district: 'Varanasi',
+    state: 'Uttar Pradesh',
+    postalCodes: ['221006'],
+    activeStoresCount: 9,
+    foodStoresCount: 5,
+    groceryStoresCount: 4,
+    isActive: true,
+    popularLandmarks: [
+      'Kalyanpur Block Office',
+      'Krishi Seva Kendra',
+      'Talab Mod',
+    ],
+    neighbors: [
+      { villageId: 'madhopur', distanceKm: 4.0, interVillageFeePaise: 2200 },
+      { villageId: 'rampur', distanceKm: 5.2, interVillageFeePaise: 2500 },
+    ],
+  },
+  {
+    id: 'haridaspur',
+    name: 'Haridaspur',
+    hindiName: 'हरिदासपुर',
+    district: 'Varanasi',
+    state: 'Uttar Pradesh',
+    postalCodes: ['221007'],
+    activeStoresCount: 8,
+    foodStoresCount: 4,
+    groceryStoresCount: 4,
+    isActive: true,
+    popularLandmarks: [
+      'Gau Shala Marg',
+      'Haridaspur Chauraha',
+      'Senior Secondary School',
+    ],
+    neighbors: [
+      { villageId: 'madhopur', distanceKm: 3.1, interVillageFeePaise: 1800 },
+    ],
+  },
+  {
+    id: 'chandpur',
+    name: 'Chandpur',
+    hindiName: 'चांदपुर',
+    district: 'Mirzapur',
+    state: 'Uttar Pradesh',
+    postalCodes: ['231304'],
+    activeStoresCount: 11,
+    foodStoresCount: 6,
+    groceryStoresCount: 5,
+    isActive: true,
+    popularLandmarks: [
+      'Nahar Kinar',
+      'Chandpur Mandir',
+      'Bazaar Mod',
+    ],
+    neighbors: [
+      { villageId: 'shivpur', distanceKm: 4.5, interVillageFeePaise: 2200 },
+    ],
+  },
+];

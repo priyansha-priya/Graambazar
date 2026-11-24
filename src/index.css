@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #218838;
+  --color-primary-dark: #176B2C;
+  --color-primary-light: #E8F5E9;
+  --color-accent: #F59E0B;
+  --color-accent-light: #FEF3C7;
+  --color-accent-dark: #B45309;
+  --color-page: #F8FAFC;
+  --color-card: #FFFFFF;
+  --color-main: #1F2937;
+  --color-secondary: #6B7280;
+  --color-border: #E5E7EB;
+  --color-success: #16A34A;
+  --color-warning: #D97706;
+  --color-error: #DC2626;
+  --color-info: #2563EB;
+}
+
+:root {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1F2937;
+  background-color: #F8FAFC;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Accessibility focus outline standards */
+*:focus-visible {
+  outline: 2px solid #218838;
+  outline-offset: 2px;
+}
+
+/* Scoped editorial typography for GramBazaar Authentication UI */
+.auth-surface {
+  font-family: "DM Sans", Inter, system-ui, -apple-system, sans-serif;
+}
+
+.auth-display {
+  font-family: "Plus Jakarta Sans", "DM Sans", system-ui, sans-serif;
+  text-wrap: balance;
+}
+
+/* Prevent duplicate native reveal icon behind custom password eye toggle */
+.auth-password-input::-ms-reveal,
+.auth-password-input::-ms-clear {
+  display: none;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideRight {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out both;
+}
+
+.animate-slide-right {
+  animation: slideRight 0.22s ease-out both;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.2s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-slide-right,
+  .animate-slide-up {
+    animation: none;
+  }
+}

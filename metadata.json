@@ -1,0 +1,6 @@
+{
+  "name": "GramBazaar - Village Food & Grocery Marketplace",
+  "description": "A multi-village hyper-local food and grocery marketplace supporting seller-managed delivery and modular multi-vertical expansion.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
