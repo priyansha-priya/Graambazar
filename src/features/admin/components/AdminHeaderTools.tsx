@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { lockBodyScroll } from '../../../utils/scrollLock';
 import {
   AlertTriangle,
   ArrowRight,
@@ -62,6 +64,11 @@ export const AdminHeaderTools: React.FC<AdminHeaderToolsProps> = ({ onSelectView
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (!isSearchOpen) return;
+    return lockBodyScroll();
+  }, [isSearchOpen]);
 
   useEffect(() => {
     if (!isBellOpen) return;
@@ -271,70 +278,82 @@ export const AdminHeaderTools: React.FC<AdminHeaderToolsProps> = ({ onSelectView
       </div>
 
       {/* Global Search Modal */}
-      {isSearchOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4 bg-slate-900/50 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white rounded-2xl border border-[#E5E7EB] shadow-2xl overflow-hidden animate-fade-in text-left">
-            <div className="flex items-center gap-2.5 px-4 py-3 border-b border-[#E5E7EB]">
-              <Search className="w-4 h-4 text-[#218838] shrink-0" />
-              <input
-                type="text"
-                autoFocus
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search sellers, customers, order IDs, products, or villages..."
-                className="flex-1 text-sm text-[#1F2937] placeholder-[#9CA3AF] outline-none bg-transparent"
-              />
-              <button
-                type="button"
-                onClick={() => setIsSearchOpen(false)}
-                className="p-1 text-[#6B7280] hover:text-[#1F2937] rounded-lg cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {isSearchOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4 pb-6 bg-slate-900/50 backdrop-blur-xs overflow-hidden"
+            onClick={() => setIsSearchOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Global Admin Search"
+          >
+            <div
+              className="w-full max-w-lg max-h-[calc(100dvh-5.5rem)] bg-white rounded-2xl border border-[#E5E7EB] shadow-2xl flex flex-col overflow-hidden text-left"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="shrink-0 flex items-center gap-2.5 px-4 py-3 border-b border-[#E5E7EB]">
+                <Search className="w-4 h-4 text-[#218838] shrink-0" />
+                <input
+                  type="text"
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search sellers, customers, order IDs, products, or villages..."
+                  className="flex-1 text-sm text-[#1F2937] placeholder-[#9CA3AF] outline-none bg-transparent"
+                />
+                <button
+                  type="button"
+                  onClick={() => setIsSearchOpen(false)}
+                  className="p-1 text-[#6B7280] hover:text-[#1F2937] rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-            <div className="max-h-80 overflow-y-auto p-2 space-y-1">
-              {searchResults.length === 0 ? (
-                <p className="p-6 text-xs text-center text-[#6B7280]">
-                  No matching sellers, customers, orders, or products found for &ldquo;{query}&rdquo;.
-                </p>
-              ) : (
-                searchResults.map((res) => (
-                  <button
-                    key={res.id}
-                    type="button"
-                    onClick={() => {
-                      setIsSearchOpen(false);
-                      setQuery('');
-                      onSelectView(res.targetView);
-                    }}
-                    className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl hover:bg-[#F8FAFC] transition-colors cursor-pointer text-left"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-7 h-7 rounded-lg bg-[#E8F5E9] text-[#176B2C] flex items-center justify-center shrink-0">
-                        {res.category === 'Seller' ? (
-                          <Store className="w-3.5 h-3.5" />
-                        ) : res.category === 'Customer' ? (
-                          <Users className="w-3.5 h-3.5" />
-                        ) : (
-                          <Search className="w-3.5 h-3.5" />
-                        )}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-[#1F2937] truncate">{res.title}</p>
-                        <p className="text-[11px] text-[#6B7280] truncate">{res.subtitle}</p>
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain modal-scroll p-2 space-y-1">
+                {searchResults.length === 0 ? (
+                  <p className="p-6 text-xs text-center text-[#6B7280]">
+                    No matching sellers, customers, orders, or products found for &ldquo;{query}&rdquo;.
+                  </p>
+                ) : (
+                  searchResults.map((res) => (
+                    <button
+                      key={res.id}
+                      type="button"
+                      onClick={() => {
+                        setIsSearchOpen(false);
+                        setQuery('');
+                        onSelectView(res.targetView);
+                      }}
+                      className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl hover:bg-[#F8FAFC] transition-colors cursor-pointer text-left"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-7 h-7 rounded-lg bg-[#E8F5E9] text-[#176B2C] flex items-center justify-center shrink-0">
+                          {res.category === 'Seller' ? (
+                            <Store className="w-3.5 h-3.5" />
+                          ) : res.category === 'Customer' ? (
+                            <Users className="w-3.5 h-3.5" />
+                          ) : (
+                            <Search className="w-3.5 h-3.5" />
+                          )}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-[#1F2937] truncate">{res.title}</p>
+                          <p className="text-[11px] text-[#6B7280] truncate">{res.subtitle}</p>
+                        </div>
                       </div>
-                    </div>
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] shrink-0">
-                      {res.category}
-                    </span>
-                  </button>
-                ))
-              )}
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] shrink-0">
+                        {res.category}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </>
   );
 };

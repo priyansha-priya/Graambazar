@@ -48,6 +48,9 @@ export interface LocalUnitDefinition {
 
 export interface GroceryProduct extends BaseProduct {
   catalogueType: 'GROCERY';
+  sku?: string;
+  brandName?: string;
+  mrpPaise?: number;
   quantityMode: QuantityMode;
   predefinedOptions?: {
     label: string; // e.g. '250 g', '500 g', '1 kg'
@@ -61,6 +64,10 @@ export interface GroceryProduct extends BaseProduct {
   quantityPrecision: number;
   trackStock: boolean;
   stockQuantity?: number;
+  lowStockThreshold?: number;
+  shelfLocation?: string;
+  expiryDate?: string;
+  supplierName?: string;
   variableWeight: boolean;
 }
 

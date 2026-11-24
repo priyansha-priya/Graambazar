@@ -4,6 +4,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { lockBodyScroll } from '../../../../utils/scrollLock';
 import {
   AlertTriangle,
   Building,
@@ -428,6 +430,11 @@ export const SellerKycDocPreviewModal: React.FC<SellerKycDocPreviewModalProps> =
     setCopied(false);
   }, [document?.id, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || !document) return;
+    return lockBodyScroll();
+  }, [isOpen, document]);
+
   if (!isOpen || !document) return null;
 
   const statusMeta = DOC_STATUS_META[document.status];
@@ -438,19 +445,19 @@ export const SellerKycDocPreviewModal: React.FC<SellerKycDocPreviewModalProps> =
     setTimeout(() => setCopied(false), 1800);
   };
 
-  return (
+  const previewMarkup = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/80 backdrop-blur-xs animate-fade-in text-left"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/80 backdrop-blur-xs overflow-hidden text-left"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
     >
       <div
-        className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-700"
+        className="bg-white w-full max-w-3xl max-h-[calc(100dvh-1.5rem)] sm:max-h-[90dvh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-700"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Bar */}
-        <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between">
+        <div className="shrink-0 bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-[#218838] flex items-center justify-center">
               <ShieldCheck className="w-4 h-4 text-white" />
@@ -472,7 +479,7 @@ export const SellerKycDocPreviewModal: React.FC<SellerKycDocPreviewModalProps> =
         </div>
 
         {/* Zoom / Rotate Toolbar */}
-        <div className="bg-[#F8FAFC] px-5 py-2.5 border-b border-[#E5E7EB] flex items-center justify-between flex-wrap gap-2 text-xs">
+        <div className="shrink-0 bg-[#F8FAFC] px-5 py-2.5 border-b border-[#E5E7EB] flex items-center justify-between flex-wrap gap-2 text-xs">
           <div className="flex items-center gap-2">
             <Badge variant={statusMeta.variant} size="sm" dot>
               {statusMeta.label}
@@ -528,13 +535,13 @@ export const SellerKycDocPreviewModal: React.FC<SellerKycDocPreviewModalProps> =
         </div>
 
         {/* Simulated Document Canvas */}
-        <div className="flex-1 bg-slate-200/80 overflow-auto p-6 flex items-center justify-center min-h-[300px]">
+        <div className="flex-1 min-h-0 bg-slate-200/80 overflow-auto overscroll-contain modal-scroll p-6 flex">
           <div
             style={{
               transform: `scale(${zoomLevel / 100}) rotate(${rotation}deg)`,
               transition: 'transform 0.15s ease-out',
             }}
-            className="origin-center bg-white w-full max-w-lg rounded-xl border border-slate-300 shadow-lg p-6 space-y-4"
+            className="m-auto origin-center bg-white w-full max-w-lg rounded-xl border border-slate-300 shadow-lg p-6 space-y-4"
           >
             <div className="flex items-center justify-between border-b border-[#E5E7EB] pb-3">
               <div className="flex items-center gap-2">
@@ -588,7 +595,7 @@ export const SellerKycDocPreviewModal: React.FC<SellerKycDocPreviewModalProps> =
         </div>
 
         {/* Footer Actions */}
-        <div className="bg-white px-5 py-3 border-t border-[#E5E7EB] flex flex-wrap items-center justify-between gap-2">
+        <div className="shrink-0 bg-white px-5 py-3 border-t border-[#E5E7EB] flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             {canApprove && (
               <>
@@ -632,4 +639,7 @@ export const SellerKycDocPreviewModal: React.FC<SellerKycDocPreviewModalProps> =
       </div>
     </div>
   );
+
+  if (typeof window === 'undefined') return previewMarkup;
+  return createPortal(previewMarkup, window.document.body);
 };

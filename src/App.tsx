@@ -1479,8 +1479,8 @@ function MainMarketplaceApp() {
 
       {/* Cross-Seller Conflict Warning Modal */}
       {conflictModalData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl text-left border border-[#E5E7EB]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-hidden">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90dvh] overflow-y-auto overscroll-contain modal-scroll shadow-2xl text-left border border-[#E5E7EB]">
             <h3 className="text-base font-bold text-[#1F2937] mb-2">
               Cart Mein Doosri Dukaan Ke Items Hain
             </h3>

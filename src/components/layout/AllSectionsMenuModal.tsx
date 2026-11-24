@@ -4,6 +4,8 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { lockBodyScroll } from '../../utils/scrollLock';
 import {
   X,
   Search,
@@ -151,24 +153,29 @@ export const AllSectionsMenuModal: React.FC<AllSectionsMenuModalProps> = ({
     hasPermission,
   } = useAdmin();
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!isOpen) return;
     setSearchQuery('');
+    const unlockScroll = lockBodyScroll();
     const focusTimer = setTimeout(() => {
       searchInputRef.current?.focus();
     }, 50);
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       clearTimeout(focusTimer);
+      unlockScroll();
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   const foodShopsTotal = useMemo(
     () => MOCK_SELLERS.filter((s) => s.primaryVertical === 'FOOD').length,
@@ -812,9 +819,9 @@ export const AllSectionsMenuModal: React.FC<AllSectionsMenuModalProps> = ({
     },
   ];
 
-  return (
+  const modalMarkup = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 lg:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 lg:p-6 overflow-hidden"
       role="dialog"
       aria-modal="true"
       aria-label="All Sections Menu"
@@ -826,7 +833,7 @@ export const AllSectionsMenuModal: React.FC<AllSectionsMenuModalProps> = ({
       />
 
       {/* Modal Container */}
-      <div className="relative z-10 w-full max-w-5xl max-h-[90vh] bg-white rounded-2xl border border-[#E5E7EB] shadow-2xl flex flex-col overflow-hidden text-left">
+      <div className="relative z-10 w-full max-w-5xl h-[min(88dvh,820px)] max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)] bg-white rounded-2xl border border-[#E5E7EB] shadow-2xl flex flex-col overflow-hidden text-left">
         {/* Top Header */}
         <div className="px-4 sm:px-6 py-4 border-b border-[#E5E7EB] bg-white flex items-center justify-between gap-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
@@ -911,7 +918,7 @@ export const AllSectionsMenuModal: React.FC<AllSectionsMenuModalProps> = ({
         </div>
 
         {/* Scrollable Sections Directory */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-7 bg-white">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain modal-scroll p-4 sm:p-6 space-y-7 bg-white">
           {filteredGroups.length === 0 ? (
             <div className="py-12 text-center space-y-3">
               <div className="w-12 h-12 rounded-full bg-[#F8FAFC] border border-[#E5E7EB] text-[#6B7280] flex items-center justify-center mx-auto">
@@ -1033,4 +1040,7 @@ export const AllSectionsMenuModal: React.FC<AllSectionsMenuModalProps> = ({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') return modalMarkup;
+  return createPortal(modalMarkup, document.body);
 };

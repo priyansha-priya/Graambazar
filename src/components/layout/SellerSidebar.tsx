@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { lockBodyScroll } from '../../utils/scrollLock';
 import {
   LayoutDashboard,
   Clock,
@@ -69,6 +70,11 @@ export const SellerSidebar: React.FC<SellerSidebarProps> = ({
   onMobileClose,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (!isMobileOpen) return;
+    return lockBodyScroll();
+  }, [isMobileOpen]);
   const { activeSeller, toggleShopOpenState, isBuzzerEnabled, toggleBuzzer } = useSeller();
   const { orders } = useOrders();
   const { getSellerMetrics } = useSafety();
@@ -244,7 +250,7 @@ export const SellerSidebar: React.FC<SellerSidebarProps> = ({
       ) : null}
 
       {/* Navigation Menu List (Grouped by Section) */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4 scrollbar-thin scrollbar-thumb-slate-700">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain modal-scroll px-3 py-3 space-y-4">
         {menuGroups.map((group) => (
           <div key={group.groupName} className="space-y-1">
             {!isCollapsed ? (
@@ -343,19 +349,19 @@ export const SellerSidebar: React.FC<SellerSidebarProps> = ({
           isCollapsed ? 'w-18' : 'w-64'
         }`}
       >
-        <div className="sticky top-16 h-[calc(100vh-4rem)]">
+        <div className="sticky top-16 h-[calc(100dvh-4rem)]">
           {sidebarContent}
         </div>
       </aside>
 
       {/* Mobile Drawer Overlay */}
       {isMobileOpen && (
-        <div className="fixed inset-0 z-50 md:hidden flex">
+        <div className="fixed inset-0 z-50 md:hidden flex overflow-hidden">
           <div
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs"
             onClick={onMobileClose}
           />
-          <div className="relative w-72 max-w-[85vw] h-full shadow-2xl z-10 animate-slide-right">
+          <div className="relative w-72 max-w-[85vw] h-full max-h-[100dvh] overflow-hidden shadow-2xl z-10 animate-slide-right">
             {sidebarContent}
           </div>
         </div>

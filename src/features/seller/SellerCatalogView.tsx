@@ -21,6 +21,12 @@ import {
   Store,
   Edit3,
   Package,
+  AlertTriangle,
+  PackageX,
+  CheckCircle2,
+  MapPin,
+  Calendar,
+  RefreshCw,
 } from 'lucide-react';
 import { useSeller } from '../../contexts/SellerContext';
 import { useAdmin } from '../../contexts/AdminContext';
@@ -55,6 +61,7 @@ type MasterSectionKey =
 
 interface DisplaySellerItem {
   id: string;
+  sku?: string;
   name: string;
   hindiName?: string;
   categoryName: string;
@@ -67,9 +74,22 @@ interface DisplaySellerItem {
   prepMinutes?: number;
   stockQuantity?: number;
   lowStockThreshold?: number;
+  shelfLocation?: string;
+  expiryDate?: string;
+  supplierName?: string;
   isAvailable: boolean;
   source: 'MASTER_PRODUCT' | 'BASE_CATALOG';
   universalRecord?: UniversalProductRecord;
+}
+
+type StockHealthStatus = 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
+
+function getItemStockStatus(item: DisplaySellerItem): StockHealthStatus {
+  const qty = item.stockQuantity ?? 0;
+  const threshold = item.lowStockThreshold ?? 8;
+  if (qty <= 0 || !item.isAvailable) return 'OUT_OF_STOCK';
+  if (qty <= threshold) return 'LOW_STOCK';
+  return 'IN_STOCK';
 }
 
 export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
@@ -101,6 +121,7 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
   const [inventoryStatusFilter, setInventoryStatusFilter] = useState<
     'ALL' | 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK'
   >('ALL');
+  const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState<string>('ALL');
   const [availabilityOverrides, setAvailabilityOverrides] = useState<Record<string, boolean>>({});
   const [stockOverrides, setStockOverrides] = useState<Record<string, number>>({});
   const [priceOverrides, setPriceOverrides] = useState<Record<string, number>>({});
@@ -121,6 +142,8 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
 
   useEffect(() => {
     setSelectedInventoryIds([]);
+    setInventoryCategoryFilter('ALL');
+    setInventoryStatusFilter('ALL');
   }, [activeSeller.id]);
 
   const showToast = (msg: string) => {
@@ -187,6 +210,7 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
         const unit = units.find((u) => u.id === p.unitId);
         return {
           id: p.id,
+          sku: p.sku,
           name: p.name,
           hindiName: p.hindiName,
           categoryName: cat?.name || p.categoryId,
@@ -197,8 +221,8 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
           mrpPaise: p.mrpPaise,
           unitLabel: unit ? `${unit.name} (${unit.symbol})` : p.unitId,
           prepMinutes: p.prepTimeMinutes,
-          stockQuantity: p.stockQuantity,
-          lowStockThreshold: p.lowStockThreshold,
+          stockQuantity: p.stockQuantity ?? 0,
+          lowStockThreshold: p.lowStockThreshold ?? 8,
           isAvailable: p.isAvailable,
           source: 'MASTER_PRODUCT',
           universalRecord: p,
@@ -219,16 +243,22 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
         const food = p as FoodProduct;
         return {
           id: p.id,
+          sku: isFoodProd ? undefined : groc.sku,
           name: p.name,
           categoryName: p.categoryName,
+          brandName: isFoodProd ? undefined : groc.brandName,
           catalogueType: p.catalogueType,
           dietType: isFoodProd ? food.dietType : undefined,
           pricePaise: priceOverrides[p.id] ?? p.pricePaise,
+          mrpPaise: isFoodProd ? undefined : groc.mrpPaise,
           unitLabel: p.unitBasis,
           prepMinutes: isFoodProd ? food.preparationTimeMinutes : undefined,
           stockQuantity:
             stockOverrides[p.id] ?? (isFoodProd ? 30 : groc.stockQuantity ?? 25),
-          lowStockThreshold: 5,
+          lowStockThreshold: isFoodProd ? 5 : groc.lowStockThreshold ?? 8,
+          shelfLocation: isFoodProd ? undefined : groc.shelfLocation,
+          expiryDate: isFoodProd ? undefined : groc.expiryDate,
+          supplierName: isFoodProd ? undefined : groc.supplierName,
           isAvailable: availabilityOverrides[p.id] ?? p.isAvailable,
           source: 'BASE_CATALOG',
         };
@@ -254,9 +284,22 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
       (item) =>
         item.name.toLowerCase().includes(q) ||
         item.categoryName.toLowerCase().includes(q) ||
-        (item.brandName?.toLowerCase().includes(q) ?? false)
+        (item.brandName?.toLowerCase().includes(q) ?? false) ||
+        (item.sku?.toLowerCase().includes(q) ?? false) ||
+        (item.shelfLocation?.toLowerCase().includes(q) ?? false) ||
+        (item.supplierName?.toLowerCase().includes(q) ?? false)
     );
   }, [mergedItems, searchQuery]);
+
+  const inventoryCategories = useMemo(() => {
+    const unique = Array.from(new Set(mergedItems.map((item) => item.categoryName)));
+    return unique.sort((a, b) => a.localeCompare(b));
+  }, [mergedItems]);
+
+  const categoryFilteredInventoryItems = useMemo(() => {
+    if (inventoryCategoryFilter === 'ALL') return filteredItems;
+    return filteredItems.filter((item) => item.categoryName === inventoryCategoryFilter);
+  }, [filteredItems, inventoryCategoryFilter]);
 
   const handleToggleItemAvailability = (item: DisplaySellerItem) => {
     if (item.source === 'MASTER_PRODUCT') {
@@ -270,29 +313,56 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
     showToast(`${item.name} marked ${item.isAvailable ? 'Sold Out' : 'Available'} live.`);
   };
 
-  const handleSetExactStock = (item: DisplaySellerItem, rawQty: number) => {
+  const handleSetExactStock = (
+    item: DisplaySellerItem,
+    rawQty: number,
+    opts?: { notify?: boolean }
+  ) => {
     const nextQty = Math.max(0, Math.floor(Number.isFinite(rawQty) ? rawQty : 0));
+    const shouldBeAvailable = nextQty > 0;
+
     if (item.source === 'MASTER_PRODUCT') {
-      updateProductInventory(item.id, nextQty);
+      if (shouldBeAvailable !== item.isAvailable) {
+        updateProduct(item.id, {
+          stockQuantity: nextQty,
+          isAvailable: shouldBeAvailable,
+        });
+      } else {
+        updateProductInventory(item.id, nextQty);
+      }
     } else {
       setStockOverrides((prev) => ({ ...prev, [item.id]: nextQty }));
+      if (shouldBeAvailable !== item.isAvailable) {
+        setAvailabilityOverrides((prev) => ({
+          ...prev,
+          [item.id]: shouldBeAvailable,
+        }));
+      }
+    }
+
+    if (opts?.notify) {
+      showToast(
+        nextQty === 0
+          ? `${item.name} is now Out of Stock (0 units).`
+          : `Restocked ${item.name} to ${nextQty} ${item.unitLabel} — live in store.`
+      );
     }
   };
 
-  const handleAdjustStock = (item: DisplaySellerItem, delta: number) => {
-    handleSetExactStock(item, (item.stockQuantity ?? 0) + delta);
+  const handleAdjustStock = (
+    item: DisplaySellerItem,
+    delta: number,
+    opts?: { notify?: boolean }
+  ) => {
+    handleSetExactStock(item, (item.stockQuantity ?? 0) + delta, opts);
   };
 
   const inventoryItems = useMemo(() => {
-    return filteredItems.filter((item) => {
-      const qty = item.stockQuantity ?? 0;
-      const threshold = item.lowStockThreshold ?? 5;
-      if (inventoryStatusFilter === 'OUT_OF_STOCK') return qty === 0 || !item.isAvailable;
-      if (inventoryStatusFilter === 'LOW_STOCK') return qty > 0 && qty <= threshold;
-      if (inventoryStatusFilter === 'IN_STOCK') return qty > threshold && item.isAvailable;
-      return true;
+    return categoryFilteredInventoryItems.filter((item) => {
+      if (inventoryStatusFilter === 'ALL') return true;
+      return getItemStockStatus(item) === inventoryStatusFilter;
     });
-  }, [filteredItems, inventoryStatusFilter]);
+  }, [categoryFilteredInventoryItems, inventoryStatusFilter]);
 
   const totalInventoryValuePaise = useMemo(
     () =>
@@ -300,6 +370,11 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
         (sum, item) => sum + (item.stockQuantity ?? 0) * item.pricePaise,
         0
       ),
+    [mergedItems]
+  );
+
+  const totalInventoryUnits = useMemo(
+    () => mergedItems.reduce((sum, item) => sum + (item.stockQuantity ?? 0), 0),
     [mergedItems]
   );
 
@@ -364,9 +439,13 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
       const nextStock = payload.applyStock
         ? computeBulkNextStock(currentStock, payload.stockMode, payload.stockValue)
         : currentStock;
+      const autoAvailability =
+        payload.applyStock && payload.availabilityAction === 'UNCHANGED'
+          ? nextStock > 0
+          : item.isAvailable;
       const nextAvailable =
         payload.availabilityAction === 'UNCHANGED'
-          ? item.isAvailable
+          ? autoAvailability
           : payload.availabilityAction === 'AVAILABLE';
 
       if (item.source === 'MASTER_PRODUCT') {
@@ -380,14 +459,14 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
         if (payload.applyStock) {
           patch.stockQuantity = nextStock;
         }
-        if (payload.availabilityAction !== 'UNCHANGED') {
+        if (payload.availabilityAction !== 'UNCHANGED' || nextAvailable !== item.isAvailable) {
           patch.isAvailable = nextAvailable;
         }
         updateProduct(item.id, patch);
       } else {
         if (payload.applyPrice) nextPriceOverrides[item.id] = nextPricePaise;
         if (payload.applyStock) nextStockOverrides[item.id] = nextStock;
-        if (payload.availabilityAction !== 'UNCHANGED') {
+        if (payload.availabilityAction !== 'UNCHANGED' || nextAvailable !== item.isAvailable) {
           nextAvailOverrides[item.id] = nextAvailable;
         }
       }
@@ -428,10 +507,54 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
   };
 
   const activeAvailableCount = mergedItems.filter((i) => i.isAvailable).length;
-  const masterLinkedCount = mergedItems.filter((i) => i.source === 'MASTER_PRODUCT').length;
-  const lowStockCount = mergedItems.filter(
-    (i) => (i.stockQuantity ?? 10) <= (i.lowStockThreshold ?? 5)
-  ).length;
+  const inStockItems = useMemo(
+    () => mergedItems.filter((i) => getItemStockStatus(i) === 'IN_STOCK'),
+    [mergedItems]
+  );
+  const lowStockItems = useMemo(
+    () => mergedItems.filter((i) => getItemStockStatus(i) === 'LOW_STOCK'),
+    [mergedItems]
+  );
+  const outOfStockItems = useMemo(
+    () => mergedItems.filter((i) => getItemStockStatus(i) === 'OUT_OF_STOCK'),
+    [mergedItems]
+  );
+  const inStockCount = inStockItems.length;
+  const lowStockCount = lowStockItems.length;
+  const outOfStockCount = outOfStockItems.length;
+  const restockAttentionCount = lowStockCount + outOfStockCount;
+
+  const filteredInStockCount = useMemo(
+    () =>
+      categoryFilteredInventoryItems.filter((i) => getItemStockStatus(i) === 'IN_STOCK').length,
+    [categoryFilteredInventoryItems]
+  );
+  const filteredLowStockCount = useMemo(
+    () =>
+      categoryFilteredInventoryItems.filter((i) => getItemStockStatus(i) === 'LOW_STOCK').length,
+    [categoryFilteredInventoryItems]
+  );
+  const filteredOutOfStockCount = useMemo(
+    () =>
+      categoryFilteredInventoryItems.filter((i) => getItemStockStatus(i) === 'OUT_OF_STOCK')
+        .length,
+    [categoryFilteredInventoryItems]
+  );
+
+  const openInventoryWithStatus = (
+    status: 'ALL' | 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK'
+  ) => {
+    setActiveTab('INVENTORY');
+    setInventoryStatusFilter(status);
+  };
+
+  const handleBulkRestockAttentionItems = () => {
+    const attentionIds = [...lowStockItems, ...outOfStockItems].map((i) => i.id);
+    if (attentionIds.length === 0) return;
+    setActiveTab('INVENTORY');
+    setSelectedInventoryIds(attentionIds);
+    setIsBulkModalOpen(true);
+  };
 
   return (
     <div className="space-y-5 animate-fade-in text-left">
@@ -440,16 +563,28 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-xs text-[#6B7280]">
             <span className="font-semibold text-[#176B2C]">
-              {isFood ? 'Food Menu & Kitchen Masters' : 'Kirana Catalog & Product Masters'}
+              {isFood
+                ? 'Food Menu & Kitchen Masters'
+                : 'Kirana Store Inventory & Grocery Masters'}
             </span>
             <span aria-hidden="true">·</span>
-            <span className="tabular-nums">{mergedItems.length} listings</span>
+            <span className="tabular-nums">{mergedItems.length} SKUs</span>
+            {!isFood && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="tabular-nums">{totalInventoryUnits} units on rack</span>
+              </>
+            )}
           </div>
           <h1 className="text-xl font-extrabold text-[#1F2937] tracking-tight">
-            Store Catalog, Product Masters &amp; Stock
+            {isFood
+              ? 'Store Catalog, Product Masters & Stock'
+              : 'Kirana Store Inventory, Stock & Product Masters'}
           </h1>
           <p className="text-xs text-[#6B7280]">
-            Add products directly using centralized Category, Brand, Unit (Pav/Kg), Variant, Attribute, Add-on, and Packaging Masters.
+            {isFood
+              ? 'Add products directly using centralized Category, Brand, Unit, Variant, Attribute, Add-on, and Packaging Masters.'
+              : 'Track In Stock, Low Stock, and Out of Stock grocery items with rack location, expiry dates, MRP rates, and quick restocking.'}
           </p>
         </div>
 
@@ -484,37 +619,41 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
 
       {/* KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4">
-          <p className="text-xs font-semibold text-[#6B7280]">Total Store Products</p>
+        <button
+          type="button"
+          onClick={() => openInventoryWithStatus('ALL')}
+          className="bg-white rounded-2xl border border-[#E5E7EB] hover:border-[#218838]/50 p-4 text-left transition-colors cursor-pointer"
+        >
+          <p className="text-xs font-semibold text-[#6B7280]">
+            {isFood ? 'Total Store Products' : 'Total Kirana SKUs'}
+          </p>
           <p className="text-2xl font-extrabold text-[#1F2937] mt-1 tabular-nums">
             {mergedItems.length}
           </p>
-          <p className="text-[11px] text-[#16A34A] mt-0.5 tabular-nums">
-            {activeAvailableCount} live for customer orders
-          </p>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4">
-          <p className="text-xs font-semibold text-[#6B7280]">Master-Linked Listings</p>
-          <p className="text-2xl font-extrabold text-[#176B2C] mt-1 tabular-nums">
-            {masterLinkedCount}
-          </p>
-          <p className="text-[11px] text-[#6B7280] mt-0.5">
-            Synced with Admin Masters &amp; Storefront
-          </p>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4">
-          <p className="text-xs font-semibold text-[#6B7280]">Active Vertical Masters</p>
-          <p className="text-2xl font-extrabold text-[#1F2937] mt-1 tabular-nums">
-            8 Masters
-          </p>
           <p className="text-[11px] text-[#6B7280] mt-0.5 tabular-nums">
-            {verticalCategories.length} cats · {verticalUnits.length} units · {verticalBrands.length} brands
+            {activeAvailableCount} live · {formatINR(totalInventoryValuePaise)} value
           </p>
-        </div>
+        </button>
 
-        <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4">
+        <button
+          type="button"
+          onClick={() => openInventoryWithStatus('IN_STOCK')}
+          className="bg-white rounded-2xl border border-[#E5E7EB] hover:border-[#16A34A]/50 p-4 text-left transition-colors cursor-pointer"
+        >
+          <p className="text-xs font-semibold text-[#6B7280]">In Stock</p>
+          <p className="text-2xl font-extrabold text-[#16A34A] mt-1 tabular-nums">
+            {inStockCount}
+          </p>
+          <p className="text-[11px] text-[#16A34A] mt-0.5">
+            Healthy stock above alert level
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => openInventoryWithStatus('LOW_STOCK')}
+          className="bg-white rounded-2xl border border-[#E5E7EB] hover:border-[#D97706]/60 p-4 text-left transition-colors cursor-pointer"
+        >
           <p className="text-xs font-semibold text-[#6B7280]">Low Stock Alerts</p>
           <p
             className={`text-2xl font-extrabold mt-1 tabular-nums ${
@@ -523,8 +662,28 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
           >
             {lowStockCount}
           </p>
-          <p className="text-[11px] text-[#6B7280] mt-0.5">Items at or below alert threshold</p>
-        </div>
+          <p className="text-[11px] text-[#D97706] mt-0.5">
+            Reorder soon · at or below threshold
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => openInventoryWithStatus('OUT_OF_STOCK')}
+          className="bg-white rounded-2xl border border-[#E5E7EB] hover:border-[#DC2626]/50 p-4 text-left transition-colors cursor-pointer"
+        >
+          <p className="text-xs font-semibold text-[#6B7280]">Out of Stock</p>
+          <p
+            className={`text-2xl font-extrabold mt-1 tabular-nums ${
+              outOfStockCount > 0 ? 'text-[#DC2626]' : 'text-[#1F2937]'
+            }`}
+          >
+            {outOfStockCount}
+          </p>
+          <p className="text-[11px] text-[#DC2626] mt-0.5">
+            0 qty / unavailable to customers
+          </p>
+        </button>
       </div>
 
       {/* Toast Feedback */}
@@ -549,9 +708,24 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
         <div className="flex flex-wrap items-center gap-1.5">
           {(
             [
-              { key: 'CATALOG', label: `My Products (${mergedItems.length})`, icon: <Package className="w-4 h-4" /> },
-              { key: 'INVENTORY', label: `Inventory & Stock`, icon: <Scale className="w-4 h-4" /> },
-              { key: 'MASTERS', label: 'Product Masters (8)', icon: <Database className="w-4 h-4" /> },
+              {
+                key: 'CATALOG',
+                label: `My Products (${mergedItems.length})`,
+                icon: <Package className="w-4 h-4" />,
+              },
+              {
+                key: 'INVENTORY',
+                label:
+                  restockAttentionCount > 0
+                    ? `Kirana Inventory (${restockAttentionCount} alerts)`
+                    : 'Kirana Inventory & Stock',
+                icon: <Scale className="w-4 h-4" />,
+              },
+              {
+                key: 'MASTERS',
+                label: 'Product Masters (8)',
+                icon: <Database className="w-4 h-4" />,
+              },
             ] as const
           ).map((t) => (
             <button
@@ -577,7 +751,7 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search item, category, brand..."
+              placeholder="Search item, SKU, brand, rack..."
               className="w-full h-9 pl-10 pr-4 bg-[#F8FAFC] border border-[#E5E7EB] rounded-full text-xs text-[#1F2937] outline-none focus:border-[#218838]"
             />
           </div>
@@ -995,38 +1169,171 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
       )}
 
       {/* ====================================================================
-       * TAB 3: INVENTORY & STOCK MANAGEMENT
+       * TAB 3: KIRANA STORE INVENTORY & STOCK MANAGEMENT
        * ================================================================== */}
       {activeTab === 'INVENTORY' && (
         <div className="space-y-4">
-          {/* Inventory Filter Bar + Stock Valuation */}
-          <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Kirana Stock Health Summary Strip */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <button
+              type="button"
+              onClick={() => setInventoryStatusFilter('IN_STOCK')}
+              className={`rounded-2xl border p-3.5 text-left transition-colors cursor-pointer ${
+                inventoryStatusFilter === 'IN_STOCK'
+                  ? 'bg-[#E8F5E9] border-[#218838]'
+                  : 'bg-white border-[#E5E7EB] hover:border-[#218838]/50'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#16A34A]">
+                  In Stock
+                </span>
+                <CheckCircle2 className="w-4 h-4 text-[#16A34A]" />
+              </div>
+              <p className="text-xl font-extrabold text-[#1F2937] mt-1 tabular-nums">
+                {inStockCount} items
+              </p>
+              <p className="text-[11px] text-[#6B7280] mt-0.5">
+                Ready for counter &amp; online orders
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setInventoryStatusFilter('LOW_STOCK')}
+              className={`rounded-2xl border p-3.5 text-left transition-colors cursor-pointer ${
+                inventoryStatusFilter === 'LOW_STOCK'
+                  ? 'bg-[#FFFBEB] border-[#D97706]'
+                  : 'bg-white border-[#E5E7EB] hover:border-[#D97706]/60'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#D97706]">
+                  Low Stock
+                </span>
+                <AlertTriangle className="w-4 h-4 text-[#D97706]" />
+              </div>
+              <p className="text-xl font-extrabold text-[#D97706] mt-1 tabular-nums">
+                {lowStockCount} items
+              </p>
+              <p className="text-[11px] text-[#6B7280] mt-0.5">
+                Order from wholesaler / mandi soon
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setInventoryStatusFilter('OUT_OF_STOCK')}
+              className={`rounded-2xl border p-3.5 text-left transition-colors cursor-pointer ${
+                inventoryStatusFilter === 'OUT_OF_STOCK'
+                  ? 'bg-[#FEF2F2] border-[#DC2626]'
+                  : 'bg-white border-[#E5E7EB] hover:border-[#DC2626]/50'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#DC2626]">
+                  Out of Stock
+                </span>
+                <PackageX className="w-4 h-4 text-[#DC2626]" />
+              </div>
+              <p className="text-xl font-extrabold text-[#DC2626] mt-1 tabular-nums">
+                {outOfStockCount} items
+              </p>
+              <p className="text-[11px] text-[#6B7280] mt-0.5">
+                Restock immediately to resume sales
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setInventoryStatusFilter('ALL')}
+              className={`rounded-2xl border p-3.5 text-left transition-colors cursor-pointer ${
+                inventoryStatusFilter === 'ALL'
+                  ? 'bg-[#F8FAFC] border-[#218838]'
+                  : 'bg-white border-[#E5E7EB] hover:border-[#218838]/50'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#176B2C]">
+                  Kirana Stock Value
+                </span>
+                <Boxes className="w-4 h-4 text-[#218838]" />
+              </div>
+              <p className="text-xl font-extrabold text-[#176B2C] mt-1 tabular-nums">
+                {formatINR(totalInventoryValuePaise)}
+              </p>
+              <p className="text-[11px] text-[#6B7280] mt-0.5 tabular-nums">
+                {totalInventoryUnits} total units across {mergedItems.length} SKUs
+              </p>
+            </button>
+          </div>
+
+          {/* Actionable Kirana Low Stock & Reorder Alert Banner */}
+          {restockAttentionCount > 0 && (
+            <div className="bg-[#FFFBEB] border border-[#F59E0B]/40 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#FEF3C7] text-[#D97706] flex items-center justify-center shrink-0 mt-0.5">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-extrabold text-[#1F2937]">
+                    Kirana Reorder Alert: {lowStockCount} Low Stock &amp; {outOfStockCount} Out of Stock
+                  </p>
+                  <p className="text-[11px] text-[#6B7280] leading-relaxed">
+                    Needs restock:{' '}
+                    <span className="font-semibold text-[#1F2937]">
+                      {[...outOfStockItems, ...lowStockItems]
+                        .slice(0, 5)
+                        .map((item) => `${item.name} (${item.stockQuantity ?? 0})`)
+                        .join(', ')}
+                      {restockAttentionCount > 5
+                        ? ` +${restockAttentionCount - 5} more`
+                        : ''}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setInventoryStatusFilter('LOW_STOCK')}
+                >
+                  View Low Stock ({lowStockCount})
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                  onClick={handleBulkRestockAttentionItems}
+                >
+                  Bulk Restock ({restockAttentionCount})
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Inventory Filter Bar + Category Filter + Bulk Update */}
+          <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1.5">
               {(
                 [
-                  { key: 'ALL', label: `All (${filteredItems.length})` },
+                  {
+                    key: 'ALL',
+                    label: `All (${categoryFilteredInventoryItems.length})`,
+                  },
                   {
                     key: 'IN_STOCK',
-                    label: `In Stock (${
-                      filteredItems.filter(
-                        (i) => (i.stockQuantity ?? 0) > (i.lowStockThreshold ?? 5) && i.isAvailable
-                      ).length
-                    })`,
+                    label: `In Stock (${filteredInStockCount})`,
                   },
                   {
                     key: 'LOW_STOCK',
-                    label: `Low Stock (${
-                      filteredItems.filter(
-                        (i) => (i.stockQuantity ?? 0) > 0 && (i.stockQuantity ?? 0) <= (i.lowStockThreshold ?? 5)
-                      ).length
-                    })`,
+                    label: `Low Stock (${filteredLowStockCount})`,
                   },
                   {
                     key: 'OUT_OF_STOCK',
-                    label: `Out of Stock (${
-                      filteredItems.filter((i) => (i.stockQuantity ?? 0) === 0 || !i.isAvailable)
-                        .length
-                    })`,
+                    label: `Out of Stock (${filteredOutOfStockCount})`,
                   },
                 ] as const
               ).map((pill) => (
@@ -1034,7 +1341,7 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
                   key={pill.key}
                   type="button"
                   onClick={() => setInventoryStatusFilter(pill.key)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer tabular-nums ${
                     inventoryStatusFilter === pill.key
                       ? 'bg-[#218838] text-white'
                       : 'bg-[#F1F5F9] text-[#475569] hover:text-[#1F2937]'
@@ -1045,13 +1352,22 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
               ))}
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="text-xs text-[#6B7280] tabular-nums">
-                Total Stock Value:{' '}
-                <strong className="text-sm font-extrabold text-[#176B2C]">
-                  {formatINR(totalInventoryValuePaise)}
-                </strong>
-              </div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Kirana Category Dropdown */}
+              <select
+                aria-label="Filter inventory by category"
+                value={inventoryCategoryFilter}
+                onChange={(e) => setInventoryCategoryFilter(e.target.value)}
+                className="h-9 px-3 bg-[#F8FAFC] border border-[#E5E7EB] rounded-lg text-xs font-semibold text-[#1F2937] outline-none focus:border-[#218838] cursor-pointer"
+              >
+                <option value="ALL">All Categories ({inventoryCategories.length})</option>
+                {inventoryCategories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+
               <Button
                 variant="secondary"
                 size="sm"
@@ -1096,13 +1412,13 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
                       priceMode: 'FIXED',
                       priceValue: 0,
                       availabilityAction: 'AVAILABLE',
-                      applyStock: false,
+                      applyStock: true,
                       stockMode: 'ADD_STOCK',
-                      stockValue: 0,
+                      stockValue: 20,
                     })
                   }
                 >
-                  Mark Available
+                  +20 Quick Restock
                 </Button>
                 <Button
                   variant="secondary"
@@ -1133,6 +1449,7 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
             </div>
           )}
 
+          {/* Kirana Inventory Data Table */}
           <div className="bg-white rounded-2xl border border-[#E5E7EB] overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left border-collapse">
@@ -1147,100 +1464,171 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
                         className="w-4 h-4 accent-[#218838] rounded cursor-pointer"
                       />
                     </th>
-                    <th className="py-3.5 px-3">Product &amp; Category</th>
-                    <th className="py-3.5 px-3 text-right">Unit Price</th>
-                    <th className="py-3.5 px-3">Stock Status</th>
+                    <th className="py-3.5 px-3">Kirana Item, Brand &amp; Rack</th>
+                    <th className="py-3.5 px-3 text-right">Rate / MRP</th>
+                    <th className="py-3.5 px-3 min-w-[165px]">Stock Status &amp; Level</th>
                     <th className="py-3.5 px-3 text-right">Stock Value</th>
                     <th className="py-3.5 px-3 text-right">Current Qty</th>
-                    <th className="py-3.5 px-4 text-right">Update Stock</th>
+                    <th className="py-3.5 px-4 text-right">Quick Restock</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F1F5F9]">
                   {inventoryItems.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-10 text-center text-[#6B7280]">
-                        No items match this inventory filter.
+                        No Kirana inventory items match this filter.
                       </td>
                     </tr>
                   ) : (
                     inventoryItems.map((item) => {
                       const qty = item.stockQuantity ?? 0;
-                      const threshold = item.lowStockThreshold ?? 5;
-                      const isOut = qty === 0 || !item.isAvailable;
-                      const isLow = !isOut && qty <= threshold;
+                      const threshold = item.lowStockThreshold ?? 8;
+                      const stockStatus = getItemStockStatus(item);
+                      const isOut = stockStatus === 'OUT_OF_STOCK';
+                      const isLow = stockStatus === 'LOW_STOCK';
                       const isSelected = selectedInventoryIds.includes(item.id);
+                      const targetCapacity = Math.max(threshold * 3, 25);
+                      const fillPercent = Math.min(100, Math.round((qty / targetCapacity) * 100));
 
                       return (
                         <tr
                           key={item.id}
                           className={`transition-colors ${
-                            isSelected ? 'bg-[#E8F5E9]/45' : 'hover:bg-[#F8FAFC]'
+                            isSelected
+                              ? 'bg-[#E8F5E9]/45'
+                              : isOut
+                              ? 'bg-[#FEF2F2]/40 hover:bg-[#FEF2F2]/70'
+                              : isLow
+                              ? 'bg-[#FFFBEB]/40 hover:bg-[#FFFBEB]/75'
+                              : 'hover:bg-[#F8FAFC]'
                           }`}
                         >
-                          <td className="py-3 pl-4 pr-2">
+                          <td className="py-3.5 pl-4 pr-2 align-top">
                             <input
                               type="checkbox"
                               aria-label={`Select ${item.name}`}
                               checked={isSelected}
                               onChange={() => handleToggleSelectRow(item.id)}
-                              className="w-4 h-4 accent-[#218838] rounded cursor-pointer"
+                              className="w-4 h-4 accent-[#218838] rounded cursor-pointer mt-0.5"
                             />
                           </td>
 
-                          <td className="py-3 px-3">
-                            <p className="font-bold text-[#1F2937]">{item.name}</p>
-                            <p className="text-[11px] text-[#6B7280]">
-                              {item.categoryName} · {item.unitLabel} · Alert ≤ {threshold}
+                          <td className="py-3.5 px-3 align-top">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <p className="font-bold text-[#1F2937]">{item.name}</p>
+                              {item.sku && (
+                                <span className="font-mono text-[10px] font-semibold text-[#6B7280] bg-[#F1F5F9] px-1.5 py-0.5 rounded">
+                                  {item.sku}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-[#6B7280] mt-0.5">
+                              {item.categoryName}
+                              {item.brandName ? ` · ${item.brandName}` : ''} · {item.unitLabel}
                             </p>
+                            {(item.shelfLocation || item.expiryDate || item.supplierName) && (
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-[10px] text-[#6B7280]">
+                                {item.shelfLocation && (
+                                  <span className="inline-flex items-center gap-1 font-medium text-[#475569]">
+                                    <MapPin className="w-3 h-3 text-[#218838]" />
+                                    {item.shelfLocation}
+                                  </span>
+                                )}
+                                {item.expiryDate && (
+                                  <span className="inline-flex items-center gap-1 tabular-nums">
+                                    <Calendar className="w-3 h-3 text-[#6B7280]" />
+                                    Exp: {item.expiryDate}
+                                  </span>
+                                )}
+                                {item.supplierName && (
+                                  <span className="text-[#6B7280]">
+                                    Mandi/Dist: {item.supplierName}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </td>
 
-                          <td className="py-3 px-3 text-right font-bold text-[#1F2937] tabular-nums">
-                            {formatINR(item.pricePaise)}
+                          <td className="py-3.5 px-3 text-right align-top tabular-nums">
+                            <p className="font-extrabold text-[#1F2937]">
+                              {formatINR(item.pricePaise)}
+                            </p>
+                            {item.mrpPaise && item.mrpPaise > item.pricePaise && (
+                              <p className="text-[10px] text-[#9CA3AF] line-through">
+                                MRP {formatINR(item.mrpPaise)}
+                              </p>
+                            )}
                           </td>
 
-                          <td className="py-3 px-3">
-                            <Badge
-                              variant={isOut ? 'error' : isLow ? 'warning' : 'success'}
-                              size="sm"
-                            >
-                              {!item.isAvailable
-                                ? 'Sold Out'
-                                : isOut
-                                ? 'Out of Stock'
-                                : isLow
-                                ? 'Low Stock'
-                                : 'In Stock'}
-                            </Badge>
+                          <td className="py-3.5 px-3 align-top">
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <Badge
+                                  variant={isOut ? 'error' : isLow ? 'warning' : 'success'}
+                                  size="sm"
+                                >
+                                  {qty > 0 && !item.isAvailable
+                                    ? 'Sold Out'
+                                    : isOut
+                                    ? 'Out of Stock'
+                                    : isLow
+                                    ? 'Low Stock'
+                                    : 'In Stock'}
+                                </Badge>
+                                <span className="text-[10px] text-[#6B7280] tabular-nums">
+                                  Alert ≤ {threshold}
+                                </span>
+                              </div>
+                              <div className="w-full h-1.5 bg-[#E5E7EB] rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all ${
+                                    isOut
+                                      ? 'bg-[#DC2626]'
+                                      : isLow
+                                      ? 'bg-[#D97706]'
+                                      : 'bg-[#16A34A]'
+                                  }`}
+                                  style={{ width: `${fillPercent}%` }}
+                                />
+                              </div>
+                            </div>
                           </td>
 
-                          <td className="py-3 px-3 text-right font-semibold text-[#1F2937] tabular-nums">
+                          <td className="py-3.5 px-3 text-right align-top font-semibold text-[#1F2937] tabular-nums">
                             {formatINR(qty * item.pricePaise)}
                           </td>
 
-                          <td className="py-3 px-3 text-right tabular-nums">
+                          <td className="py-3.5 px-3 text-right align-top tabular-nums">
                             <input
                               type="number"
                               min={0}
                               aria-label={`Stock quantity for ${item.name}`}
                               value={qty}
                               onChange={(e) => handleSetExactStock(item, Number(e.target.value))}
-                              className="w-20 h-8 px-2 text-right font-extrabold text-[#1F2937] bg-[#F8FAFC] border border-[#E5E7EB] rounded-lg outline-none focus:border-[#218838] tabular-nums"
+                              className={`w-20 h-8 px-2 text-right font-extrabold rounded-lg border outline-none focus:border-[#218838] tabular-nums ${
+                                isOut
+                                  ? 'bg-[#FEF2F2] border-[#DC2626]/40 text-[#DC2626]'
+                                  : isLow
+                                  ? 'bg-[#FFFBEB] border-[#D97706]/50 text-[#D97706]'
+                                  : 'bg-[#F8FAFC] border-[#E5E7EB] text-[#1F2937]'
+                              }`}
                             />
                           </td>
 
-                          <td className="py-3 px-4 text-right">
+                          <td className="py-3.5 px-4 text-right align-top">
                             <div className="inline-flex items-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => handleAdjustStock(item, -1)}
-                                className="px-2 py-1 rounded-lg border border-[#E5E7EB] hover:bg-[#FEE2E2] text-xs font-bold text-[#1F2937] cursor-pointer tabular-nums"
+                                disabled={qty === 0}
+                                className="px-2 py-1 rounded-lg border border-[#E5E7EB] bg-white hover:bg-[#FEE2E2] disabled:opacity-40 text-xs font-bold text-[#1F2937] cursor-pointer tabular-nums"
                               >
                                 -1
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleAdjustStock(item, 5)}
-                                className="px-2 py-1 rounded-lg border border-[#E5E7EB] hover:bg-[#E8F5E9] text-xs font-bold text-[#176B2C] cursor-pointer tabular-nums"
+                                className="px-2 py-1 rounded-lg border border-[#E5E7EB] bg-white hover:bg-[#E8F5E9] text-xs font-bold text-[#176B2C] cursor-pointer tabular-nums"
                               >
                                 +5
                               </button>
@@ -1251,6 +1639,17 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
                               >
                                 +10
                               </button>
+                              {(isLow || isOut) && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleAdjustStock(item, 20, { notify: true })
+                                  }
+                                  className="px-2.5 py-1 rounded-lg bg-[#218838] hover:bg-[#176B2C] text-xs font-bold text-white cursor-pointer tabular-nums whitespace-nowrap"
+                                >
+                                  +20 Restock
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>

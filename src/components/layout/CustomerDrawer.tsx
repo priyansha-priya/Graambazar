@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { lockBodyScroll } from '../../utils/scrollLock';
 import {
   X,
   Home,
@@ -71,15 +73,22 @@ export const CustomerDrawer: React.FC<CustomerDrawerProps> = ({
   const [activeTab, setActiveTab] = useState<DrawerTab>('MENU');
   const [orderFilter, setOrderFilter] = useState<OrderListFilter>('ALL');
 
-  // Close drawer cleanly on Escape key
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Lock body scroll and close drawer cleanly on Escape key
   useEffect(() => {
     if (!isOpen) return;
+    const unlockScroll = lockBodyScroll();
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    return () => {
+      unlockScroll();
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
 
   const sortedOrders = useMemo(() => {
     const source =
@@ -180,8 +189,8 @@ export const CustomerDrawer: React.FC<CustomerDrawerProps> = ({
     );
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Customer Menu and Order History">
+  const drawerMarkup = (
+    <div className="fixed inset-0 z-50 flex overflow-hidden" role="dialog" aria-modal="true" aria-label="Customer Menu and Order History">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
@@ -189,7 +198,7 @@ export const CustomerDrawer: React.FC<CustomerDrawerProps> = ({
       />
 
       {/* Drawer Body */}
-      <div className="relative w-[340px] sm:w-96 max-w-[90vw] h-full bg-white shadow-2xl flex flex-col z-10 animate-slide-right text-left">
+      <div className="relative w-[340px] sm:w-96 max-w-[90vw] h-full max-h-[100dvh] bg-white shadow-2xl flex flex-col overflow-hidden z-10 animate-slide-right text-left">
         {/* Header */}
         <div className="p-4 bg-gradient-to-r from-[#218838] to-[#176B2C] text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -285,7 +294,7 @@ export const CustomerDrawer: React.FC<CustomerDrawerProps> = ({
 
         {/* Tab Panel Body */}
         {activeTab === 'MENU' ? (
-          <div role="tabpanel" className="flex-1 overflow-y-auto p-3 space-y-4">
+          <div role="tabpanel" className="flex-1 min-h-0 overflow-y-auto overscroll-contain modal-scroll p-3 space-y-4">
             {/* Browse All Sections CTA */}
             {onOpenAllSections && (
               <button
@@ -540,7 +549,7 @@ export const CustomerDrawer: React.FC<CustomerDrawerProps> = ({
             </div>
 
             {/* Scrollable Orders List */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain modal-scroll p-3 space-y-2.5">
               {sortedOrders.length === 0 ? (
                 <div className="bg-white rounded-2xl border border-[#E5E7EB] p-6 text-center space-y-2.5 mt-4">
                   <div className="w-11 h-11 rounded-full bg-[#F1F5F9] text-[#6B7280] flex items-center justify-center mx-auto">
@@ -653,4 +662,7 @@ export const CustomerDrawer: React.FC<CustomerDrawerProps> = ({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') return drawerMarkup;
+  return createPortal(drawerMarkup, document.body);
 };

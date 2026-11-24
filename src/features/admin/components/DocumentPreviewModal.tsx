@@ -4,6 +4,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { lockBodyScroll } from '../../../utils/scrollLock';
 import {
   X,
   ZoomIn,
@@ -54,6 +56,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     setZoomLevel(100);
     setRotation(0);
   }, [initialDocType, application?.id, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !application) return;
+    return lockBodyScroll();
+  }, [isOpen, application]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -121,19 +128,19 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  return (
+  const modalMarkup = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/80 backdrop-blur-xs animate-fade-in text-left"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/80 backdrop-blur-xs overflow-hidden text-left"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
     >
       <div
-        className="bg-white w-full max-w-5xl h-[92vh] max-h-[850px] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-700"
+        className="bg-white w-full max-w-5xl h-[min(92dvh,850px)] max-h-[calc(100dvh-1.5rem)] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-700"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Bar */}
-        <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between border-b border-slate-800">
+        <div className="shrink-0 bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-[#218838] flex items-center justify-center text-white">
               <ShieldCheck className="w-5 h-5" />
@@ -163,7 +170,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         </div>
 
         {/* Tab Selection Row & Controls */}
-        <div className="bg-[#F8FAFC] px-5 py-2.5 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-3">
+        <div className="shrink-0 bg-[#F8FAFC] px-5 py-2.5 border-b border-[#E5E7EB] flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
             {docTabs.map((tab) => {
               const isSelected = currentTab.id === tab.id;
@@ -233,13 +240,13 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         </div>
 
         {/* Document Viewing Canvas */}
-        <div className="flex-1 bg-slate-200/80 overflow-auto p-4 sm:p-8 flex items-center justify-center relative select-none">
+        <div className="flex-1 min-h-0 bg-slate-200/80 overflow-auto overscroll-contain modal-scroll p-4 sm:p-8 flex relative select-none">
           <div
             style={{
               transform: `scale(${zoomLevel / 100}) rotate(${rotation}deg)`,
               transition: 'transform 0.15s ease-out',
             }}
-            className="origin-center shadow-2xl rounded-lg overflow-hidden bg-white max-w-2xl w-full border border-slate-300"
+            className="m-auto origin-center shadow-2xl rounded-lg overflow-hidden bg-white max-w-2xl w-full border border-slate-300"
           >
             {currentTab.id === 'FSSAI' && (
               <div className="p-8 bg-[#FFFFFA] border-8 border-double border-emerald-900/30 text-[#1F2937] space-y-5 font-serif">
@@ -350,7 +357,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         </div>
 
         {/* Bottom Actions */}
-        <div className="bg-white px-5 py-3 border-t border-[#E5E7EB] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="shrink-0 bg-white px-5 py-3 border-t border-[#E5E7EB] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-3 flex-wrap">
             <div>
               <span className="text-[#6B7280]">Document Reference:</span>
@@ -403,4 +410,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') return modalMarkup;
+  return createPortal(modalMarkup, document.body);
 };

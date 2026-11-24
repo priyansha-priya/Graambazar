@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { lockBodyScroll } from '../../utils/scrollLock';
 import {
   LayoutDashboard,
   UserCheck,
@@ -123,6 +124,11 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   ).length;
 
   const isAnyMasterActive = MASTER_VIEW_KEYS.includes(currentView);
+
+  useEffect(() => {
+    if (!isMobileOpen) return;
+    return lockBodyScroll();
+  }, [isMobileOpen]);
 
   // Auto-open Masters accordion whenever a master screen is navigated to
   useEffect(() => {
@@ -424,7 +430,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       </div>
 
       {/* Navigation Menu List */}
-      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-5 scrollbar-thin scrollbar-thumb-slate-700">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain modal-scroll px-3 py-4 space-y-5">
         {menuGroups.map((group, groupIdx) => (
           <div key={groupIdx} className="space-y-1">
             {!isCollapsed ? (
@@ -597,19 +603,19 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           isCollapsed ? 'w-18' : 'w-64'
         }`}
       >
-        <div className="sticky top-16 h-[calc(100vh-4rem)]">
+        <div className="sticky top-16 h-[calc(100dvh-4rem)]">
           {sidebarContent}
         </div>
       </aside>
 
       {/* Mobile Drawer Overlay */}
       {isMobileOpen && (
-        <div className="fixed inset-0 z-50 md:hidden flex">
+        <div className="fixed inset-0 z-50 md:hidden flex overflow-hidden">
           <div
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs"
             onClick={onMobileClose}
           />
-          <div className="relative w-72 max-w-[85vw] h-full shadow-2xl z-10 animate-slide-right">
+          <div className="relative w-72 max-w-[85vw] h-full max-h-[100dvh] overflow-hidden shadow-2xl z-10 animate-slide-right">
             {sidebarContent}
           </div>
         </div>
