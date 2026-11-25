@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useSeller } from '../../contexts/SellerContext';
 import { useAdmin } from '../../contexts/AdminContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { MOCK_FOOD_PRODUCTS, MOCK_GROCERY_PRODUCTS } from '../../constants/mockData';
 import { FoodProduct, GroceryProduct } from '../../types/product';
 import { UniversalProductRecord, VariantSizeMasterRecord } from '../../types/admin';
@@ -96,6 +97,7 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
   initialTab = 'CATALOG',
 }) => {
   const { activeSeller, allSellers, setActiveSellerId } = useSeller();
+  const { getAuthHeaders } = useAuth();
   const {
     categories,
     brands,
@@ -145,6 +147,102 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
     setInventoryCategoryFilter('ALL');
     setInventoryStatusFilter('ALL');
   }, [activeSeller.id]);
+
+  // Hydrate persisted inventory overrides from Cloud SQL PostgreSQL
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSellerInventory() {
+      try {
+        const res = await fetch(
+          `/api/catalog/inventory/${encodeURIComponent(activeSeller.id)}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !Array.isArray(data.items) || data.items.length === 0) return;
+
+        const nextStock: Record<string, number> = {};
+        const nextPrice: Record<string, number> = {};
+        const nextAvail: Record<string, boolean> = {};
+
+        for (const row of data.items as Array<{
+          externalId?: string;
+          stockQuantity?: number;
+          pricePaise?: number;
+          isAvailable?: boolean;
+        }>) {
+          if (!row.externalId) continue;
+          if (typeof row.stockQuantity === 'number' && Number.isFinite(row.stockQuantity)) {
+            nextStock[row.externalId] = row.stockQuantity;
+          }
+          if (typeof row.pricePaise === 'number' && Number.isFinite(row.pricePaise)) {
+            nextPrice[row.externalId] = row.pricePaise;
+          }
+          if (typeof row.isAvailable === 'boolean') {
+            nextAvail[row.externalId] = row.isAvailable;
+          }
+        }
+
+        if (Object.keys(nextStock).length > 0) {
+          setStockOverrides((prev) => ({ ...prev, ...nextStock }));
+        }
+        if (Object.keys(nextPrice).length > 0) {
+          setPriceOverrides((prev) => ({ ...prev, ...nextPrice }));
+        }
+        if (Object.keys(nextAvail).length > 0) {
+          setAvailabilityOverrides((prev) => ({ ...prev, ...nextAvail }));
+        }
+      } catch {
+        // Keep local catalog responsive if offline
+      }
+    }
+    void loadSellerInventory();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSeller.id]);
+
+  const persistSingleInventoryItem = async (
+    externalId: string,
+    payload: {
+      stockQuantity?: number;
+      isAvailable?: boolean;
+      pricePaise?: number;
+      reason?: string;
+    }
+  ) => {
+    try {
+      const headers = await getAuthHeaders();
+      if (!headers) return;
+      await fetch(`/api/inventory/${encodeURIComponent(externalId)}/stock`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Keep UI responsive on transient network errors
+    }
+  };
+
+  const persistBulkInventoryItems = async (
+    updates: Array<{
+      externalId: string;
+      pricePaise?: number;
+      stockQuantity?: number;
+      isAvailable?: boolean;
+    }>
+  ) => {
+    try {
+      const headers = await getAuthHeaders();
+      if (!headers || updates.length === 0) return;
+      await fetch('/api/inventory/bulk-update', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ updates }),
+      });
+    } catch {
+      // Keep UI responsive on transient network errors
+    }
+  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -302,14 +400,19 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
   }, [filteredItems, inventoryCategoryFilter]);
 
   const handleToggleItemAvailability = (item: DisplaySellerItem) => {
+    const nextAvailable = !item.isAvailable;
     if (item.source === 'MASTER_PRODUCT') {
       toggleProductAvailability(item.id);
     } else {
       setAvailabilityOverrides((prev) => ({
         ...prev,
-        [item.id]: !item.isAvailable,
+        [item.id]: nextAvailable,
       }));
     }
+    void persistSingleInventoryItem(item.id, {
+      isAvailable: nextAvailable,
+      reason: nextAvailable ? 'Marked Available by seller' : 'Marked Sold Out by seller',
+    });
     showToast(`${item.name} marked ${item.isAvailable ? 'Sold Out' : 'Available'} live.`);
   };
 
@@ -339,6 +442,12 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
         }));
       }
     }
+
+    void persistSingleInventoryItem(item.id, {
+      stockQuantity: nextQty,
+      isAvailable: shouldBeAvailable,
+      reason: nextQty === 0 ? 'Marked Out of Stock' : 'Seller stock quantity update',
+    });
 
     if (opts?.notify) {
       showToast(
@@ -430,6 +539,12 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
     const nextPriceOverrides: Record<string, number> = {};
     const nextStockOverrides: Record<string, number> = {};
     const nextAvailOverrides: Record<string, boolean> = {};
+    const dbBulkUpdates: Array<{
+      externalId: string;
+      pricePaise?: number;
+      stockQuantity?: number;
+      isAvailable?: boolean;
+    }> = [];
 
     targetItems.forEach((item) => {
       const currentStock = item.stockQuantity ?? 0;
@@ -470,6 +585,16 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
           nextAvailOverrides[item.id] = nextAvailable;
         }
       }
+
+      dbBulkUpdates.push({
+        externalId: item.id,
+        pricePaise: payload.applyPrice ? nextPricePaise : undefined,
+        stockQuantity: payload.applyStock ? nextStock : undefined,
+        isAvailable:
+          payload.availabilityAction !== 'UNCHANGED' || nextAvailable !== item.isAvailable
+            ? nextAvailable
+            : undefined,
+      });
     });
 
     if (Object.keys(nextPriceOverrides).length > 0) {
@@ -481,6 +606,8 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
     if (Object.keys(nextAvailOverrides).length > 0) {
       setAvailabilityOverrides((prev) => ({ ...prev, ...nextAvailOverrides }));
     }
+
+    void persistBulkInventoryItems(dbBulkUpdates);
 
     const updatedDimensions: string[] = [];
     if (payload.applyPrice) updatedDimensions.push('price');

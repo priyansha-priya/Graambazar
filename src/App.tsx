@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 
 // Contexts & Constants
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { VillageProvider, useVillage } from './contexts/VillageContext';
 import { CartProvider, useCart } from './contexts/CartContext';
 import { OrderProvider, useOrders } from './contexts/OrderContext';
@@ -159,6 +160,7 @@ type UserPortalRole = 'CUSTOMER' | 'SELLER' | 'ADMIN';
 type CustomerView = 'MARKETPLACE' | 'CART' | 'CHECKOUT' | 'ORDER_TRACKING' | 'ORDER_HISTORY' | 'MY_UDHAR';
 
 function MainMarketplaceApp() {
+  const { firebaseUser, dbProfile, signOutUser } = useAuth();
   const { activeVillage, selectedLandmark, getDeliveryRelationship } = useVillage();
   const { items: cartItems, seller: cartSeller, addItem, forceAddItem, itemSubtotalPaise } = useCart();
   const {
@@ -471,11 +473,13 @@ function MainMarketplaceApp() {
           portal: 'SELLER',
         }
       : {
-          name: 'Ramesh Kumar',
-          identifier: '+91 98765 43210',
+          name: dbProfile?.displayName || firebaseUser?.displayName || 'Ramesh Kumar',
+          identifier: firebaseUser?.email || '+91 98765 43210',
           roleLabel: 'Customer',
           locationLabel: activeVillage.name,
-          initials: 'RK',
+          initials: getInitials(
+            dbProfile?.displayName || firebaseUser?.displayName || 'Ramesh Kumar'
+          ),
           portal: 'CUSTOMER',
         };
 
@@ -1522,6 +1526,7 @@ function MainMarketplaceApp() {
         account={activeAccountSummary}
         onCancel={() => setIsLogoutModalOpen(false)}
         onConfirmLogout={() => {
+          void signOutUser();
           setIsLogoutModalOpen(false);
           setAuthScreen('LOGIN');
           showToast('Signed out of GramBazaar.');
@@ -1619,20 +1624,22 @@ function MainMarketplaceApp() {
 
 export default function App() {
   return (
-    <VillageProvider>
-      <SellerProvider>
-        <SafetyProvider>
-          <UdhariProvider>
-            <CartProvider>
-              <OrderProvider>
-                <AdminProvider>
-                  <MainMarketplaceApp />
-                </AdminProvider>
-              </OrderProvider>
-            </CartProvider>
-          </UdhariProvider>
-        </SafetyProvider>
-      </SellerProvider>
-    </VillageProvider>
+    <AuthProvider>
+      <VillageProvider>
+        <SellerProvider>
+          <SafetyProvider>
+            <UdhariProvider>
+              <CartProvider>
+                <OrderProvider>
+                  <AdminProvider>
+                    <MainMarketplaceApp />
+                  </AdminProvider>
+                </OrderProvider>
+              </CartProvider>
+            </UdhariProvider>
+          </SafetyProvider>
+        </SellerProvider>
+      </VillageProvider>
+    </AuthProvider>
   );
 }

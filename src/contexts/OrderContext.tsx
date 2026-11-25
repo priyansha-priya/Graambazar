@@ -10,6 +10,7 @@ import {
   RefundStatus,
   SellerOrderNotification,
 } from '../types/order';
+import { useAuth } from './AuthContext';
 
 const DEFAULT_ACCEPT_WINDOW_SECONDS = 300; // 5 minutes to accept incoming order
 
@@ -1414,6 +1415,7 @@ const getInitialMockOrders = (): Order[] => {
 };
 
 export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { firebaseUser, getAuthHeaders } = useAuth();
   const [orders, setOrders] = useState<Order[]>(() => {
     const seedOrders = getInitialMockOrders();
     const saved = localStorage.getItem('grambazaar_orders');
@@ -1460,6 +1462,35 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     localStorage.setItem('grambazaar_orders', JSON.stringify(orders));
   }, [orders]);
+
+  // Hydrate signed-in customer's persisted orders from Cloud SQL PostgreSQL
+  useEffect(() => {
+    let cancelled = false;
+    async function hydrateOrdersFromDb() {
+      if (!firebaseUser) return;
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) return;
+        const res = await fetch('/api/orders', { headers });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !Array.isArray(data.orders) || data.orders.length === 0) return;
+
+        const dbOrders = data.orders as Order[];
+        setOrders((prev) => {
+          const dbOrderNumbers = new Set(dbOrders.map((o) => o.orderNumber));
+          const remainingLocal = prev.filter((o) => !dbOrderNumbers.has(o.orderNumber));
+          return [...dbOrders, ...remainingLocal];
+        });
+      } catch {
+        // Keep local orders resilient if offline
+      }
+    }
+    void hydrateOrdersFromDb();
+    return () => {
+      cancelled = true;
+    };
+  }, [firebaseUser?.uid, getAuthHeaders]);
 
   const activeOrders = orders.filter((o) => !TERMINAL_ORDER_STATUSES.includes(o.status));
 
@@ -1541,6 +1572,20 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     setLatestIncomingNotification(notification);
     playOrderNotificationChime();
 
+    void (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) return;
+        await fetch('/api/orders', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(newOrder),
+        });
+      } catch {
+        // Keep optimistic UI order intact if network temporarily drops
+      }
+    })();
+
     return newOrder;
   };
 
@@ -1618,6 +1663,24 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       )
     );
 
+    void (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) return;
+        await fetch(`/api/orders/${encodeURIComponent(target.orderNumber)}/status`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({
+            status: 'cancelled',
+            actorRole: 'CUSTOMER',
+            reason: cancelReason,
+          }),
+        });
+      } catch {
+        // Ignore transient network errors
+      }
+    })();
+
     return { success: true, message: 'Order cancelled successfully.' };
   };
 
@@ -1680,6 +1743,27 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         return o;
       })
     );
+
+    const targetOrder = orders.find((o) => o.id === orderId);
+    if (targetOrder) {
+      void (async () => {
+        try {
+          const headers = await getAuthHeaders();
+          if (!headers) return;
+          await fetch(`/api/orders/${encodeURIComponent(targetOrder.orderNumber)}/status`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({
+              status: nextStatus,
+              actorRole,
+              reason: reason || `Status advanced to ${nextStatus}`,
+            }),
+          });
+        } catch {
+          // Ignore transient network errors
+        }
+      })();
+    }
 
     if (nextStatus !== 'placed' && nextStatus !== 'pending') {
       setSellerNotifications((prev) =>
