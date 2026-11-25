@@ -5,6 +5,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
+import type { Order, OrderEvent, OrderItemSnapshot, OrderStatus, PaymentMethod, PaymentStatus } from '../types/order';
 import {
   AdminRole,
   AdminModuleKey,
@@ -48,18 +49,6 @@ import {
   CancellationPolicyRuleRecord,
   DeliveryPartnerRecord,
 } from '../types/admin';
-import {
-  INITIAL_CUSTOMERS,
-  INITIAL_PAYOUTS,
-  INITIAL_PAYMENT_TRANSACTIONS,
-  INITIAL_REFUNDS,
-  INITIAL_CMS_BANNERS,
-  INITIAL_CMS_POLICIES,
-  INITIAL_REVIEWS,
-  INITIAL_BROADCASTS,
-  INITIAL_TAX_SLABS,
-  INITIAL_CANCELLATION_RULES,
-} from './adminExtendedSeed';
 
 interface AdminContextType {
   // Admin Users & RBAC
@@ -193,6 +182,22 @@ interface AdminContextType {
     variantStocks?: Record<string, number>
   ) => void;
   toggleProductAvailability: (productId: string) => void;
+  sellerCreateProduct: (
+    sellerCode: string,
+    product: Omit<UniversalProductRecord, 'id' | 'createdAt' | 'updatedAt'>
+  ) => void;
+  sellerUpdateProduct: (
+    sellerCode: string,
+    productId: string,
+    patch: Partial<UniversalProductRecord>
+  ) => void;
+  sellerUpdateProductInventory: (
+    sellerCode: string,
+    productId: string,
+    stockQuantity: number,
+    variantStocks?: Record<string, number>
+  ) => void;
+  sellerToggleProductAvailability: (sellerCode: string, productId: string) => void;
 
   // Service Areas & Inter-Village Matrix Master
   serviceAreas: VillageServiceAreaRecord[];
@@ -306,6 +311,12 @@ interface AdminContextType {
   ) => void;
   clearAuditLogs: () => void;
   resetAdminData: () => void;
+
+  // Global Platform Orders (PostgreSQL /api/admin/orders) & API Feedback
+  adminOrders: Order[];
+  refreshAdminOrders: () => Promise<void>;
+  lastApiError: string | null;
+  clearApiError: () => void;
 }
 
 const ALL_MODULES: AdminModuleKey[] = [
@@ -496,72 +507,11 @@ const INITIAL_ADMIN_USERS: AdminUser[] = [
   },
 ];
 
-// Catalog Masters (verticals, categories, attributes, units, option groups, brands, variant masters, packaging masters, availability configs),
-// sellers, applications, universal products, service areas, routes, delivery partners, and audit logs are hydrated directly from PostgreSQL.
+// Catalog Masters, sellers, applications, universal products, service areas, routes, delivery partners,
+// audit logs, fee rules, offers, tax slabs, cancellation rules, payouts, transactions, and refunds
+// are hydrated directly from PostgreSQL.
 
-const INITIAL_FEE_RULES: FeeRuleRecord[] = [
-  { id: 'fee_01', name: 'Standard Food Delivery Pilot Rule', vertical: 'FOOD', commissionBps: 500, platformFeePaise: 200, effectiveFrom: '2026-10-01', isPilotShadowMode: true, status: 'ACTIVE' },
-  { id: 'fee_02', name: 'Standard Grocery Pilot Rule', vertical: 'GROCERY', commissionBps: 300, platformFeePaise: 200, effectiveFrom: '2026-10-01', isPilotShadowMode: true, status: 'ACTIVE' },
-  { id: 'fee_03', name: 'Agri Inputs & Seeds Rule', vertical: 'AGRICULTURE', commissionBps: 250, platformFeePaise: 500, effectiveFrom: '2026-11-01', isPilotShadowMode: true, status: 'ACTIVE' },
-  { id: 'fee_04', name: 'Hardware & Electronics Rule', vertical: 'HARDWARE', commissionBps: 400, platformFeePaise: 500, effectiveFrom: '2026-11-01', isPilotShadowMode: true, status: 'ACTIVE' },
-];
-
-const INITIAL_OFFERS: OfferCouponRecord[] = [
-  { id: 'off_01', code: 'GRAM50', title: 'Welcome ₹50 Off on First Village Order', discountType: 'FLAT', discountValue: 5000, minOrderPaise: 25000, vertical: 'ALL', villageId: 'ALL', fundedBy: 'PLATFORM', validFrom: '2026-10-01', validUntil: '2026-12-31', usageLimit: 500, usedCount: 124, isActive: true },
-  { id: 'off_02', code: 'RAMPURFREE', title: 'Free Delivery in Rampur & Madhopur', discountType: 'FREE_DELIVERY', discountValue: 0, minOrderPaise: 19900, vertical: 'FOOD', villageId: 'v-rampur', fundedBy: 'PLATFORM', validFrom: '2026-10-15', validUntil: '2026-11-30', usageLimit: 300, usedCount: 89, isActive: true },
-  { id: 'off_03', code: 'KISAN10', title: '10% Off on Rabi Seeds & Fertilizer', discountType: 'PERCENTAGE', discountValue: 10, minOrderPaise: 100000, maxDiscountPaise: 25000, vertical: 'AGRICULTURE', villageId: 'ALL', fundedBy: 'SELLER', validFrom: '2026-10-20', validUntil: '2026-12-15', usageLimit: 150, usedCount: 31, isActive: true },
-];
-
-const INITIAL_SUPPORT_CASES: SupportCaseRecord[] = [
-  {
-    id: 'case_101',
-    orderId: 'ORD-RAM-0881',
-    vertical: 'FOOD',
-    customerName: 'Suresh Kumar',
-    customerPhone: '+91 98222 33441',
-    sellerId: 'sel_01',
-    sellerName: 'Chaudhary Dhaba & Sweets',
-    issueType: 'MISSING_ITEM',
-    status: 'OPEN',
-    amountPaise: 12000,
-    description: 'Ordered 2 Paneer Butter Masala and 4 Rotis. Received only 1 Paneer Butter Masala.',
-    createdAt: '2026-11-02T07:15:00Z',
-    updatedAt: '2026-11-02T07:15:00Z',
-  },
-  {
-    id: 'case_102',
-    orderId: 'ORD-RAM-0879',
-    vertical: 'GROCERY',
-    customerName: 'Anita Verma',
-    customerPhone: '+91 98333 44552',
-    sellerId: 'sel_02',
-    sellerName: 'Gupta Kirana & General Store',
-    issueType: 'DAMAGED_IN_TRANSIT',
-    status: 'INVESTIGATING',
-    amountPaise: 18000,
-    description: 'Mustard oil bottle seal was broken during runner transit.',
-    resolutionNotes: 'Spoke with shopkeeper Mohan Gupta; agreed to issue runner replacement.',
-    createdAt: '2026-11-01T15:30:00Z',
-    updatedAt: '2026-11-01T17:00:00Z',
-  },
-  {
-    id: 'case_103',
-    orderId: 'ORD-RAM-0864',
-    vertical: 'APPAREL',
-    customerName: 'Deepak Mishra',
-    customerPhone: '+91 99182 55109',
-    sellerId: 'sel_06',
-    sellerName: 'Shree Ram Vastra Bhandar',
-    issueType: 'WRONG_VARIANT',
-    status: 'OPEN',
-    amountPaise: 64900,
-    description: 'Ordered Size L White Khadi Kurta but received Size M.',
-    createdAt: '2026-11-02T08:10:00Z',
-    updatedAt: '2026-11-02T08:10:00Z',
-  },
-];
-
-const INITIAL_PLATFORM_SETTINGS: PlatformSettingsRecord = {
+const DEFAULT_PLATFORM_SETTINGS: PlatformSettingsRecord = {
   platformName: 'GramBazaar',
   tagline: 'Apne Gaon Ka Apna Universal Bazaar',
   supportPhone: '+91 1800-120-4455',
@@ -572,7 +522,7 @@ const INITIAL_PLATFORM_SETTINGS: PlatformSettingsRecord = {
   autoCancelUnacceptedMins: 15,
   foodPrepSlaMins: 35,
   maintenanceMode: false,
-  maintenanceMessage: 'GramBazaar is undergoing scheduled village catalogue maintenance. We will be back shortly.',
+  maintenanceMessage: '',
 };
 
 // Audit logs are stored and queried from PostgreSQL (/api/admin/audit-logs).
@@ -636,23 +586,14 @@ const AdminContext = createContext<AdminContextType | null>(null);
 export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { firebaseUser, getAuthHeaders } = useAuth();
 
-  const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() =>
-    loadStored(STORAGE_KEYS.ADMIN_USERS, INITIAL_ADMIN_USERS)
-  );
+  // Hydrated from PostgreSQL (/api/admin/rbac/summary); only active persona selector is stored locally
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>(INITIAL_ADMIN_USERS);
   const [currentAdminId, setCurrentAdminId] = useState<string>(() =>
     loadStored(STORAGE_KEYS.CURRENT_ADMIN_ID, INITIAL_ADMIN_USERS[0].id)
   );
-  const [rolePermissions, setRolePermissions] = useState<RolePermissionMatrix>(() => {
-    const stored = loadStored<Partial<RolePermissionMatrix>>(STORAGE_KEYS.ROLE_PERMISSIONS, {});
-    const merged = { ...INITIAL_ROLE_PERMISSIONS } as RolePermissionMatrix;
-    (['SUPER_ADMIN', 'ADMIN_OPS', 'ADMIN_FINANCE', 'ADMIN_SUPPORT'] as AdminRole[]).forEach((role) => {
-      merged[role] = {
-        ...INITIAL_ROLE_PERMISSIONS[role],
-        ...(stored[role] || {}),
-      };
-    });
-    return merged;
-  });
+  const [rolePermissions, setRolePermissions] = useState<RolePermissionMatrix>(
+    INITIAL_ROLE_PERMISSIONS
+  );
   // Hydrated directly from PostgreSQL (no localStorage or client-side mock fallback)
   const [applications, setApplications] = useState<SellerApplication[]>([]);
   const [sellers, setSellers] = useState<MasterSellerRecord[]>([]);
@@ -668,86 +609,114 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [products, setProducts] = useState<UniversalProductRecord[]>([]);
   const [serviceAreas, setServiceAreas] = useState<VillageServiceAreaRecord[]>([]);
   const [interVillageRoutes, setInterVillageRoutes] = useState<InterVillageRouteRecord[]>([]);
-  const [feeRules, setFeeRules] = useState<FeeRuleRecord[]>(() =>
-    loadStored(STORAGE_KEYS.FEE_RULES, INITIAL_FEE_RULES)
+  const [feeRules, setFeeRules] = useState<FeeRuleRecord[]>([]);
+  const [offers, setOffers] = useState<OfferCouponRecord[]>([]);
+  const [supportCases, setSupportCases] = useState<SupportCaseRecord[]>([]);
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettingsRecord>(
+    DEFAULT_PLATFORM_SETTINGS
   );
-  const [offers, setOffers] = useState<OfferCouponRecord[]>(() =>
-    loadStored(STORAGE_KEYS.OFFERS, INITIAL_OFFERS)
-  );
-  const [supportCases, setSupportCases] = useState<SupportCaseRecord[]>(() =>
-    loadStored(STORAGE_KEYS.SUPPORT_CASES, INITIAL_SUPPORT_CASES)
-  );
-  const [platformSettings, setPlatformSettings] = useState<PlatformSettingsRecord>(() =>
-    loadStored(STORAGE_KEYS.SETTINGS, INITIAL_PLATFORM_SETTINGS)
-  );
-  const [customers, setCustomers] = useState<AdminCustomerRecord[]>(() =>
-    loadStored(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS)
-  );
-  const [payouts, setPayouts] = useState<SellerPayoutRecord[]>(() => {
-    const stored = loadStored(STORAGE_KEYS.PAYOUTS, INITIAL_PAYOUTS);
-    const ids = new Set(stored.map((item) => item.id));
-    const merged = [
-      ...stored.map((item) => {
-        const seedMatch = INITIAL_PAYOUTS.find((s) => s.id === item.id);
-        return seedMatch ? { ...seedMatch, ...item } : item;
-      }),
-      ...INITIAL_PAYOUTS.filter((s) => !ids.has(s.id)),
-    ];
-    return merged;
-  });
-  const [paymentTransactions, setPaymentTransactions] = useState<PaymentTransactionRecord[]>(() => {
-    const stored = loadStored(STORAGE_KEYS.TRANSACTIONS, INITIAL_PAYMENT_TRANSACTIONS);
-    const ids = new Set(stored.map((item) => item.id));
-    return [
-      ...stored.map((item) => {
-        const seedMatch = INITIAL_PAYMENT_TRANSACTIONS.find((s) => s.id === item.id);
-        return seedMatch ? { ...seedMatch, ...item } : item;
-      }),
-      ...INITIAL_PAYMENT_TRANSACTIONS.filter((s) => !ids.has(s.id)),
-    ];
-  });
-  const [refundLedger, setRefundLedger] = useState<RefundLedgerRecord[]>(() => {
-    const stored = loadStored(STORAGE_KEYS.REFUNDS, INITIAL_REFUNDS);
-    const ids = new Set(stored.map((item) => item.id));
-    return [
-      ...stored.map((item) => {
-        const seedMatch = INITIAL_REFUNDS.find((s) => s.id === item.id);
-        return seedMatch ? { ...seedMatch, ...item } : item;
-      }),
-      ...INITIAL_REFUNDS.filter((s) => !ids.has(s.id)),
-    ];
-  });
-  const [cmsBanners, setCmsBanners] = useState<CmsBannerRecord[]>(() =>
-    loadStored(STORAGE_KEYS.CMS_BANNERS, INITIAL_CMS_BANNERS)
-  );
-  const [featuredSellerIds, setFeaturedSellerIds] = useState<string[]>(() =>
-    loadStored(STORAGE_KEYS.FEATURED_SELLERS, ['sel_1', 'sel_2'])
-  );
-  const [cmsPolicies, setCmsPolicies] = useState<CmsPolicyPageRecord[]>(() =>
-    loadStored(STORAGE_KEYS.CMS_POLICIES, INITIAL_CMS_POLICIES)
-  );
-  const [reviews, setReviews] = useState<CustomerReviewRecord[]>(() =>
-    loadStored(STORAGE_KEYS.REVIEWS, INITIAL_REVIEWS)
-  );
-  const [broadcasts, setBroadcasts] = useState<BroadcastMessageRecord[]>(() =>
-    loadStored(STORAGE_KEYS.BROADCASTS, INITIAL_BROADCASTS)
-  );
-  const [taxSlabs, setTaxSlabs] = useState<TaxSlabRecord[]>(() =>
-    loadStored(STORAGE_KEYS.TAX_SLABS, INITIAL_TAX_SLABS)
-  );
-  const [cancellationRules, setCancellationRules] = useState<CancellationPolicyRuleRecord[]>(() =>
-    loadStored(STORAGE_KEYS.CANCELLATION_RULES, INITIAL_CANCELLATION_RULES)
-  );
+  const [customers, setCustomers] = useState<AdminCustomerRecord[]>([]);
+  const [payouts, setPayouts] = useState<SellerPayoutRecord[]>([]);
+  const [paymentTransactions, setPaymentTransactions] = useState<PaymentTransactionRecord[]>([]);
+  const [refundLedger, setRefundLedger] = useState<RefundLedgerRecord[]>([]);
+  const [cmsBanners, setCmsBanners] = useState<CmsBannerRecord[]>([]);
+  const [featuredSellerIds, setFeaturedSellerIds] = useState<string[]>([]);
+  const [cmsPolicies, setCmsPolicies] = useState<CmsPolicyPageRecord[]>([]);
+  const [reviews, setReviews] = useState<CustomerReviewRecord[]>([]);
+  const [broadcasts, setBroadcasts] = useState<BroadcastMessageRecord[]>([]);
+  const [taxSlabs, setTaxSlabs] = useState<TaxSlabRecord[]>([]);
+  const [cancellationRules, setCancellationRules] = useState<CancellationPolicyRuleRecord[]>([]);
   const [deliveryPartners, setDeliveryPartners] = useState<DeliveryPartnerRecord[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
+  const [adminOrders, setAdminOrders] = useState<Order[]>([]);
+  const [lastApiError, setLastApiError] = useState<string | null>(null);
+
+  const clearApiError = useCallback(() => setLastApiError(null), []);
 
   const currentAdmin = adminUsers.find((u) => u.id === currentAdminId) || adminUsers[0] || INITIAL_ADMIN_USERS[0];
 
+  const mapDbAdminOrder = useCallback((raw: Record<string, unknown>): Order => {
+    const id = String(raw.orderNumber || raw.id || '');
+    const itemsRaw = Array.isArray(raw.items) ? (raw.items as Record<string, unknown>[]) : [];
+    const historyRaw = Array.isArray(raw.statusHistory)
+      ? (raw.statusHistory as Record<string, unknown>[])
+      : [];
+
+    const items: OrderItemSnapshot[] = itemsRaw.map((item, idx) => ({
+      id: String(item.id || `${id}_item_${idx}`),
+      productId: String(item.productId || item.sku || item.id || `prod_${idx}`),
+      productName: String(item.productName || 'Item'),
+      catalogueType: String(item.catalogueType || 'GROCERY'),
+      sku: typeof item.sku === 'string' ? item.sku : undefined,
+      unitPricePaise: Number(item.unitPricePaise) || 0,
+      requestedQuantity: Number(item.requestedQuantity) || 1,
+      requestedUnitLabel: String(item.requestedUnitLabel || 'unit'),
+      lineTotalPaise: Number(item.lineTotalPaise) || 0,
+      customerNote: typeof item.customerNote === 'string' ? item.customerNote : undefined,
+    }));
+
+    const statusHistory: OrderEvent[] = historyRaw.map((h, idx) => ({
+      id: `${id}_evt_${idx}`,
+      orderId: id,
+      fromStatus: (String(h.fromStatus || 'placed') as OrderStatus),
+      toStatus: (String(h.toStatus || raw.status || 'placed') as OrderStatus),
+      actorRole: String(h.actorRole || 'SYSTEM'),
+      reason: typeof h.reason === 'string' ? h.reason : undefined,
+      timestamp: String(h.timestamp || raw.createdAt || new Date().toISOString()),
+    }));
+
+    return {
+      id,
+      orderNumber: id,
+      customerId: String(raw.customerUid || 'customer'),
+      customerName: String(raw.customerName || 'Customer'),
+      customerPhone: String(raw.customerPhone || ''),
+      sellerId: String(raw.sellerId || ''),
+      sellerName: String(raw.sellerName || 'GramBazaar Store'),
+      sellerPhone: '',
+      villageId: String(raw.villageId || 'rampur'),
+      fulfilmentMode: raw.fulfilmentMode === 'PICKUP' ? 'PICKUP' : 'DELIVERY',
+      deliveryAddress:
+        raw.deliveryAddress && typeof raw.deliveryAddress === 'object'
+          ? (raw.deliveryAddress as Order['deliveryAddress'])
+          : undefined,
+      deliveryNote: typeof raw.deliveryNote === 'string' ? raw.deliveryNote : undefined,
+      status: String(raw.status || 'placed') as OrderStatus,
+      statusHistory,
+      items,
+      paymentMethod: (String(raw.paymentMethod || 'COD') as PaymentMethod),
+      paymentStatus: (String(raw.paymentStatus || 'pending') as PaymentStatus),
+      itemSubtotalPaise: Number(raw.itemSubtotalPaise) || 0,
+      deliveryFeePaise: Number(raw.deliveryFeePaise) || 0,
+      packagingFeePaise: Number(raw.packagingFeePaise) || 0,
+      platformFeePaise: Number(raw.platformFeePaise) || 0,
+      totalPaise: Number(raw.totalPaise) || 0,
+      cancellation:
+        raw.cancellation && typeof raw.cancellation === 'object'
+          ? (raw.cancellation as Order['cancellation'])
+          : undefined,
+      returnInfo:
+        raw.returnInfo && typeof raw.returnInfo === 'object'
+          ? (raw.returnInfo as Order['returnInfo'])
+          : undefined,
+      refundInfo:
+        raw.refundInfo && typeof raw.refundInfo === 'object'
+          ? (raw.refundInfo as Order['refundInfo'])
+          : undefined,
+      createdAt: String(raw.createdAt || new Date().toISOString()),
+      updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()),
+    };
+  }, []);
+
   const adminRequest = useCallback(
     async <T,>(path: string, init: RequestInit = {}): Promise<T | null> => {
+      const method = (init.method || 'GET').toUpperCase();
       try {
         const authHeaders = await getAuthHeaders();
         if (!authHeaders) {
+          if (method !== 'GET') {
+            setLastApiError('Changes save karne ke liye pehle Admin Google account se sign in karein.');
+          }
           return null;
         }
         const headers: Record<string, string> = {
@@ -757,17 +726,56 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         };
         const res = await fetch(path, { ...init, headers });
         if (!res.ok) {
-          console.error(`Admin API ${init.method || 'GET'} ${path} failed (${res.status})`);
+          let serverMessage = '';
+          try {
+            const errPayload = (await res.json()) as { error?: string };
+            serverMessage = errPayload.error || '';
+          } catch {
+            // Non-JSON error body
+          }
+          if (res.status === 401) {
+            setLastApiError('Session expired ya sign-in zaroori hai. Please Admin Google account se sign in karein.');
+          } else if (res.status === 403) {
+            setLastApiError('Is action ke liye Admin role permission chahiye.');
+          } else if (method !== 'GET') {
+            setLastApiError(serverMessage || 'Changes save nahi ho paaye. Please try again.');
+          }
+          console.error(`Admin API ${method} ${path} failed (${res.status})`);
           return null;
+        }
+        if (method !== 'GET') {
+          setLastApiError(null);
         }
         return (await res.json()) as T;
       } catch (error) {
+        if (method !== 'GET') {
+          setLastApiError('Server se connection nahi ho paaya. Please try again.');
+        }
         console.error(`Admin API request error for ${path}:`, error);
         return null;
       }
     },
     [getAuthHeaders]
   );
+
+  const refreshAdminOrders = useCallback(async () => {
+    const authHeaders = await getAuthHeaders();
+    if (!authHeaders?.Authorization) {
+      setAdminOrders([]);
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/orders', { headers: authHeaders });
+      if (res.ok) {
+        const data = (await res.json()) as { orders?: Record<string, unknown>[] };
+        if (Array.isArray(data.orders)) {
+          setAdminOrders(data.orders.map(mapDbAdminOrder));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to refresh admin orders from PostgreSQL:', error);
+    }
+  }, [getAuthHeaders, mapDbAdminOrder]);
 
   const hydrateFromDatabase = useCallback(async () => {
     try {
@@ -784,6 +792,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         appRes,
         partnerRes,
         auditRes,
+        ordersRes,
+        financeSummaryRes,
+        engagementSummaryRes,
+        rbacSummaryRes,
       ] = await Promise.all([
         fetch('/api/catalog/masters'),
         fetch('/api/catalog/categories'),
@@ -803,6 +815,18 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : Promise.resolve(null),
         hasAuth && authHeaders
           ? fetch('/api/admin/audit-logs', { headers: authHeaders })
+          : Promise.resolve(null),
+        hasAuth && authHeaders
+          ? fetch('/api/admin/orders', { headers: authHeaders })
+          : Promise.resolve(null),
+        hasAuth && authHeaders
+          ? fetch('/api/admin/finance/summary', { headers: authHeaders })
+          : Promise.resolve(null),
+        hasAuth && authHeaders
+          ? fetch('/api/admin/engagement/summary', { headers: authHeaders })
+          : Promise.resolve(null),
+        hasAuth && authHeaders
+          ? fetch('/api/admin/rbac/summary', { headers: authHeaders })
           : Promise.resolve(null),
       ]);
 
@@ -858,34 +882,122 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const data = (await auditRes.json()) as { auditLogs?: AuditLogRecord[] };
         if (Array.isArray(data.auditLogs)) setAuditLogs(data.auditLogs);
       }
+      if (ordersRes && ordersRes.ok) {
+        const data = (await ordersRes.json()) as { orders?: Record<string, unknown>[] };
+        if (Array.isArray(data.orders)) setAdminOrders(data.orders.map(mapDbAdminOrder));
+      } else if (!hasAuth) {
+        setAdminOrders([]);
+      }
+
+      if (financeSummaryRes && financeSummaryRes.ok) {
+        const financeData = (await financeSummaryRes.json()) as {
+          feeRules?: FeeRuleRecord[];
+          offers?: OfferCouponRecord[];
+          taxSlabs?: TaxSlabRecord[];
+          cancellationRules?: CancellationPolicyRuleRecord[];
+          payouts?: SellerPayoutRecord[];
+          paymentTransactions?: PaymentTransactionRecord[];
+          refundLedger?: RefundLedgerRecord[];
+        };
+        if (Array.isArray(financeData.feeRules)) setFeeRules(financeData.feeRules);
+        if (Array.isArray(financeData.offers)) setOffers(financeData.offers);
+        if (Array.isArray(financeData.taxSlabs)) setTaxSlabs(financeData.taxSlabs);
+        if (Array.isArray(financeData.cancellationRules)) setCancellationRules(financeData.cancellationRules);
+        if (Array.isArray(financeData.payouts)) setPayouts(financeData.payouts);
+        if (Array.isArray(financeData.paymentTransactions)) {
+          setPaymentTransactions(financeData.paymentTransactions);
+        }
+        if (Array.isArray(financeData.refundLedger)) setRefundLedger(financeData.refundLedger);
+      } else {
+        const [pubOffersRes, pubTaxRes, pubCancelRes] = await Promise.all([
+          fetch('/api/catalog/offers'),
+          fetch('/api/catalog/tax-slabs'),
+          fetch('/api/catalog/cancellation-rules'),
+        ]);
+        if (pubOffersRes.ok) {
+          const data = (await pubOffersRes.json()) as { offers?: OfferCouponRecord[] };
+          if (Array.isArray(data.offers)) setOffers(data.offers);
+        }
+        if (pubTaxRes.ok) {
+          const data = (await pubTaxRes.json()) as { taxSlabs?: TaxSlabRecord[] };
+          if (Array.isArray(data.taxSlabs)) setTaxSlabs(data.taxSlabs);
+        }
+        if (pubCancelRes.ok) {
+          const data = (await pubCancelRes.json()) as { cancellationRules?: CancellationPolicyRuleRecord[] };
+          if (Array.isArray(data.cancellationRules)) setCancellationRules(data.cancellationRules);
+        }
+        if (!hasAuth) {
+          setFeeRules([]);
+          setPayouts([]);
+          setPaymentTransactions([]);
+          setRefundLedger([]);
+        }
+      }
+
+      if (engagementSummaryRes && engagementSummaryRes.ok) {
+        const engData = (await engagementSummaryRes.json()) as {
+          supportCases?: SupportCaseRecord[];
+          customers?: AdminCustomerRecord[];
+          platformSettings?: PlatformSettingsRecord;
+          cmsBanners?: CmsBannerRecord[];
+          featuredSellerIds?: string[];
+          cmsPolicies?: CmsPolicyPageRecord[];
+          reviews?: CustomerReviewRecord[];
+          broadcasts?: BroadcastMessageRecord[];
+        };
+        if (Array.isArray(engData.supportCases)) setSupportCases(engData.supportCases);
+        if (Array.isArray(engData.customers)) setCustomers(engData.customers);
+        if (engData.platformSettings) setPlatformSettings(engData.platformSettings);
+        if (Array.isArray(engData.cmsBanners)) setCmsBanners(engData.cmsBanners);
+        if (Array.isArray(engData.featuredSellerIds)) setFeaturedSellerIds(engData.featuredSellerIds);
+        if (Array.isArray(engData.cmsPolicies)) setCmsPolicies(engData.cmsPolicies);
+        if (Array.isArray(engData.reviews)) setReviews(engData.reviews);
+        if (Array.isArray(engData.broadcasts)) setBroadcasts(engData.broadcasts);
+      } else {
+        const pubContentRes = await fetch('/api/catalog/storefront-content');
+        if (pubContentRes.ok) {
+          const pubData = (await pubContentRes.json()) as {
+            platformSettings?: PlatformSettingsRecord;
+            cmsBanners?: CmsBannerRecord[];
+            featuredSellerIds?: string[];
+            cmsPolicies?: CmsPolicyPageRecord[];
+            reviews?: CustomerReviewRecord[];
+          };
+          if (pubData.platformSettings) setPlatformSettings(pubData.platformSettings);
+          if (Array.isArray(pubData.cmsBanners)) setCmsBanners(pubData.cmsBanners);
+          if (Array.isArray(pubData.featuredSellerIds)) setFeaturedSellerIds(pubData.featuredSellerIds);
+          if (Array.isArray(pubData.cmsPolicies)) setCmsPolicies(pubData.cmsPolicies);
+          if (Array.isArray(pubData.reviews)) setReviews(pubData.reviews);
+        }
+        if (!hasAuth) {
+          setSupportCases([]);
+          setCustomers([]);
+          setBroadcasts([]);
+        }
+      }
+      if (rbacSummaryRes && rbacSummaryRes.ok) {
+        const rbacData = (await rbacSummaryRes.json()) as {
+          adminUsers?: AdminUser[];
+          rolePermissions?: RolePermissionMatrix;
+        };
+        if (Array.isArray(rbacData.adminUsers) && rbacData.adminUsers.length > 0) {
+          setAdminUsers(rbacData.adminUsers);
+        }
+        if (rbacData.rolePermissions) {
+          setRolePermissions(rbacData.rolePermissions);
+        }
+      }
     } catch (error) {
       console.error('Failed to hydrate admin catalog from PostgreSQL:', error);
     }
-  }, [getAuthHeaders]);
+  }, [getAuthHeaders, mapDbAdminOrder]);
 
   useEffect(() => {
     void hydrateFromDatabase();
   }, [hydrateFromDatabase, firebaseUser?.uid]);
 
-  // Persist remaining non-DB slices cleanly (all Catalog Masters, sellers, categories, products, applications, service areas, routes, delivery partners, audit logs are persisted in PostgreSQL)
-  useEffect(() => { saveStored(STORAGE_KEYS.ADMIN_USERS, adminUsers); }, [adminUsers]);
+  // Only active admin persona switcher preference is stored locally; RBAC users, permissions, and all platform data are persisted in PostgreSQL
   useEffect(() => { saveStored(STORAGE_KEYS.CURRENT_ADMIN_ID, currentAdminId); }, [currentAdminId]);
-  useEffect(() => { saveStored(STORAGE_KEYS.ROLE_PERMISSIONS, rolePermissions); }, [rolePermissions]);
-  useEffect(() => { saveStored(STORAGE_KEYS.FEE_RULES, feeRules); }, [feeRules]);
-  useEffect(() => { saveStored(STORAGE_KEYS.OFFERS, offers); }, [offers]);
-  useEffect(() => { saveStored(STORAGE_KEYS.SUPPORT_CASES, supportCases); }, [supportCases]);
-  useEffect(() => { saveStored(STORAGE_KEYS.SETTINGS, platformSettings); }, [platformSettings]);
-  useEffect(() => { saveStored(STORAGE_KEYS.CUSTOMERS, customers); }, [customers]);
-  useEffect(() => { saveStored(STORAGE_KEYS.PAYOUTS, payouts); }, [payouts]);
-  useEffect(() => { saveStored(STORAGE_KEYS.TRANSACTIONS, paymentTransactions); }, [paymentTransactions]);
-  useEffect(() => { saveStored(STORAGE_KEYS.REFUNDS, refundLedger); }, [refundLedger]);
-  useEffect(() => { saveStored(STORAGE_KEYS.CMS_BANNERS, cmsBanners); }, [cmsBanners]);
-  useEffect(() => { saveStored(STORAGE_KEYS.FEATURED_SELLERS, featuredSellerIds); }, [featuredSellerIds]);
-  useEffect(() => { saveStored(STORAGE_KEYS.CMS_POLICIES, cmsPolicies); }, [cmsPolicies]);
-  useEffect(() => { saveStored(STORAGE_KEYS.REVIEWS, reviews); }, [reviews]);
-  useEffect(() => { saveStored(STORAGE_KEYS.BROADCASTS, broadcasts); }, [broadcasts]);
-  useEffect(() => { saveStored(STORAGE_KEYS.TAX_SLABS, taxSlabs); }, [taxSlabs]);
-  useEffect(() => { saveStored(STORAGE_KEYS.CANCELLATION_RULES, cancellationRules); }, [cancellationRules]);
 
   const logAuditEvent = (
     actionType: string,
@@ -944,23 +1056,55 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const switchActiveAdmin = (adminId: string) => {
     const target = adminUsers.find((u) => u.id === adminId);
     if (!target) return;
+    const nowIso = new Date().toISOString();
     setCurrentAdminId(adminId);
     setAdminUsers((prev) =>
-      prev.map((u) => (u.id === adminId ? { ...u, lastActiveAt: new Date().toISOString() } : u))
+      prev.map((u) => (u.id === adminId ? { ...u, lastActiveAt: nowIso } : u))
+    );
+    void adminRequest<{ adminUser?: AdminUser }>(
+      `/api/admin/rbac/users/${encodeURIComponent(adminId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ lastActiveAt: nowIso }),
+      }
     );
   };
 
   const addAdminUser = (user: Omit<AdminUser, 'id' | 'lastActiveAt'>) => {
     const id = `admin_${Date.now()}`;
+    const nowIso = new Date().toISOString();
     setAdminUsers((prev) => [
-      { ...user, id, status: user.status || 'ACTIVE', lastActiveAt: new Date().toISOString() },
+      { ...user, id, status: user.status || 'ACTIVE', lastActiveAt: nowIso },
       ...prev,
     ]);
+    void adminRequest<{ adminUser?: AdminUser }>('/api/admin/rbac/users', {
+      method: 'POST',
+      body: JSON.stringify({ ...user, id }),
+    }).then((res) => {
+      if (res?.adminUser) {
+        setAdminUsers((prev) => prev.map((u) => (u.id === id ? res.adminUser! : u)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('ADMIN_USER_CREATED', 'AdminUser', id, `Created admin account ${user.name} (${user.role})`);
   };
 
   const updateAdminUser = (adminId: string, patch: Partial<AdminUser>) => {
     setAdminUsers((prev) => prev.map((u) => (u.id === adminId ? { ...u, ...patch } : u)));
+    void adminRequest<{ adminUser?: AdminUser }>(
+      `/api/admin/rbac/users/${encodeURIComponent(adminId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ).then((res) => {
+      if (res?.adminUser) {
+        setAdminUsers((prev) => prev.map((u) => (u.id === adminId ? res.adminUser! : u)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('ADMIN_USER_UPDATED', 'AdminUser', adminId, `Updated admin profile ${adminId}`, undefined, patch as Record<string, unknown>);
   };
 
@@ -981,6 +1125,16 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         },
       },
     }));
+    void adminRequest<{ rolePermissions?: RolePermissionMatrix }>('/api/admin/rbac/permissions', {
+      method: 'PATCH',
+      body: JSON.stringify({ role, module, key, value }),
+    }).then((res) => {
+      if (res?.rolePermissions) {
+        setRolePermissions(res.rolePermissions);
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('RBAC_PERMISSION_UPDATED', 'RolePermission', `${role}:${module}`, `Set ${role}.${module}.${key} = ${value}`);
   };
 
@@ -2131,6 +2285,146 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     logAuditEvent('INVENTORY_UPDATED', 'Product', productId, `Updated stock for "${target?.name}" to ${stockQuantity}`);
   };
 
+  const sellerRequest = useCallback(
+    async <T,>(path: string, init?: RequestInit): Promise<T | null> => {
+      const authHeaders = await getAuthHeaders();
+      if (!authHeaders?.Authorization) return null;
+      try {
+        const res = await fetch(path, {
+          ...init,
+          headers: {
+            ...authHeaders,
+            ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(init?.headers ?? {}),
+          },
+        });
+        if (!res.ok) return null;
+        return (await res.json()) as T;
+      } catch {
+        return null;
+      }
+    },
+    [getAuthHeaders]
+  );
+
+  const sellerCreateProduct = (
+    sellerCode: string,
+    product: Omit<UniversalProductRecord, 'id' | 'createdAt' | 'updatedAt'>
+  ) => {
+    const id = `prod_${Date.now()}`;
+    const now = new Date().toISOString();
+    const optimistic: UniversalProductRecord = {
+      ...product,
+      id,
+      sellerId: sellerCode,
+      moderationStatus: 'PENDING_REVIEW',
+      createdAt: now,
+      updatedAt: now,
+    };
+    setProducts((prev) => [optimistic, ...prev]);
+    void sellerRequest<{ product?: UniversalProductRecord }>(
+      `/api/seller/${encodeURIComponent(sellerCode)}/products`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ ...product, id }),
+      }
+    ).then((res) => {
+      if (res?.product) {
+        setProducts((prev) => prev.map((p) => (p.id === id ? res.product! : p)));
+      }
+    });
+  };
+
+  const sellerUpdateProduct = (
+    sellerCode: string,
+    productId: string,
+    patch: Partial<UniversalProductRecord>
+  ) => {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p
+      )
+    );
+    void sellerRequest<{ product?: UniversalProductRecord }>(
+      `/api/seller/${encodeURIComponent(sellerCode)}/products/${encodeURIComponent(productId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ).then((res) => {
+      if (res?.product) {
+        setProducts((prev) => prev.map((p) => (p.id === productId ? res.product! : p)));
+      }
+    });
+  };
+
+  const sellerUpdateProductInventory = (
+    sellerCode: string,
+    productId: string,
+    stockQuantity: number,
+    variantStocks?: Record<string, number>
+  ) => {
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (p.id !== productId) return p;
+        const updatedVariants = variantStocks
+          ? p.variants.map((v) =>
+              variantStocks[v.id] !== undefined
+                ? {
+                    ...v,
+                    stockQuantity: Math.max(0, variantStocks[v.id]),
+                    isAvailable: variantStocks[v.id] > 0,
+                  }
+                : v
+            )
+          : p.variants;
+        const totalStock =
+          p.inventoryMode === 'VARIANT_STOCK' && updatedVariants.length > 0
+            ? updatedVariants.reduce((sum, v) => sum + v.stockQuantity, 0)
+            : Math.max(0, stockQuantity);
+        return {
+          ...p,
+          stockQuantity: totalStock,
+          variants: updatedVariants,
+          isAvailable:
+            totalStock > 0 ||
+            p.inventoryMode === 'PREPARED_FOOD' ||
+            p.inventoryMode === 'MADE_TO_ORDER',
+          updatedAt: new Date().toISOString(),
+        };
+      })
+    );
+    void sellerRequest<{ product?: UniversalProductRecord }>(
+      `/api/seller/${encodeURIComponent(sellerCode)}/products/${encodeURIComponent(productId)}/inventory`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ stockQuantity, variantStocks }),
+      }
+    ).then((res) => {
+      if (res?.product) {
+        setProducts((prev) => prev.map((p) => (p.id === productId ? res.product! : p)));
+      }
+    });
+  };
+
+  const sellerToggleProductAvailability = (sellerCode: string, productId: string) => {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId
+          ? { ...p, isAvailable: !p.isAvailable, updatedAt: new Date().toISOString() }
+          : p
+      )
+    );
+    void sellerRequest<{ product?: UniversalProductRecord }>(
+      `/api/seller/${encodeURIComponent(sellerCode)}/products/${encodeURIComponent(productId)}/availability`,
+      { method: 'PATCH' }
+    ).then((res) => {
+      if (res?.product) {
+        setProducts((prev) => prev.map((p) => (p.id === productId ? res.product! : p)));
+      }
+    });
+  };
+
   const toggleProductAvailability = (productId: string) => {
     const target = products.find((p) => p.id === productId);
     setProducts((prev) =>
@@ -2292,23 +2586,56 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     logAuditEvent('INTER_VILLAGE_ROUTE_DELETED', 'InterVillageRoute', routeId, `Removed inter-village route ${routeId}`);
   };
 
-  // Fee Rules
+  // Fee Rules (PostgreSQL-backed)
   const togglePilotShadowMode = (ruleId: string) => {
     const rule = feeRules.find((r) => r.id === ruleId);
     setFeeRules((prev) =>
       prev.map((r) => (r.id === ruleId ? { ...r, isPilotShadowMode: !r.isPilotShadowMode } : r))
     );
+    void adminRequest<{ feeRule?: FeeRuleRecord }>(
+      `/api/admin/fee-rules/${encodeURIComponent(ruleId)}/toggle-shadow`,
+      { method: 'PATCH' }
+    ).then((res) => {
+      if (res?.feeRule) {
+        setFeeRules((prev) => prev.map((r) => (r.id === ruleId ? res.feeRule! : r)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('FEE_SHADOW_MODE_TOGGLED', 'FeeRule', ruleId, `Rule ${rule?.name} shadow mode set to ${!rule?.isPilotShadowMode}`);
   };
 
   const createFeeRule = (rule: Omit<FeeRuleRecord, 'id' | 'status'>) => {
     const id = `fee_${Date.now()}`;
     setFeeRules((prev) => [{ ...rule, id, status: 'ACTIVE' }, ...prev]);
+    void adminRequest<{ feeRule?: FeeRuleRecord }>('/api/admin/fee-rules', {
+      method: 'POST',
+      body: JSON.stringify({ ...rule, id }),
+    }).then((res) => {
+      if (res?.feeRule) {
+        setFeeRules((prev) => prev.map((r) => (r.id === id ? res.feeRule! : r)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('FEE_RULE_CREATED', 'FeeRule', id, `Created fee rule ${rule.name}: ${rule.commissionBps} bps`);
   };
 
   const updateFeeRule = (ruleId: string, patch: Partial<FeeRuleRecord>) => {
     setFeeRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)));
+    void adminRequest<{ feeRule?: FeeRuleRecord }>(
+      `/api/admin/fee-rules/${encodeURIComponent(ruleId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ).then((res) => {
+      if (res?.feeRule) {
+        setFeeRules((prev) => prev.map((r) => (r.id === ruleId ? res.feeRule! : r)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('FEE_RULE_UPDATED', 'FeeRule', ruleId, `Updated fee rule ${ruleId}`);
   };
 
@@ -2317,34 +2644,86 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setFeeRules((prev) =>
       prev.map((r) => (r.id === ruleId ? { ...r, status: r.status === 'ACTIVE' ? 'DEPRECATED' : 'ACTIVE' } : r))
     );
+    void adminRequest<{ feeRule?: FeeRuleRecord }>(
+      `/api/admin/fee-rules/${encodeURIComponent(ruleId)}/toggle-status`,
+      { method: 'PATCH' }
+    ).then((res) => {
+      if (res?.feeRule) {
+        setFeeRules((prev) => prev.map((r) => (r.id === ruleId ? res.feeRule! : r)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('FEE_RULE_STATUS_CHANGED', 'FeeRule', ruleId, `Toggled status for rule ${rule?.name || ruleId}`);
   };
 
-  // Offers & Coupons
+  // Offers & Coupons (PostgreSQL-backed)
   const addOffer = (offer: Omit<OfferCouponRecord, 'id' | 'usedCount'>) => {
     const id = `off_${Date.now()}`;
-    setOffers((prev) => [{ ...offer, id, code: offer.code.trim().toUpperCase(), usedCount: 0 }, ...prev]);
-    logAuditEvent('OFFER_CREATED', 'OfferCoupon', id, `Created coupon ${offer.code.toUpperCase()} (${offer.title})`);
+    const normalizedCode = offer.code.trim().toUpperCase();
+    setOffers((prev) => [{ ...offer, id, code: normalizedCode, usedCount: 0 }, ...prev]);
+    void adminRequest<{ offer?: OfferCouponRecord }>('/api/admin/offers', {
+      method: 'POST',
+      body: JSON.stringify({ ...offer, id, code: normalizedCode }),
+    }).then((res) => {
+      if (res?.offer) {
+        setOffers((prev) => prev.map((o) => (o.id === id ? res.offer! : o)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
+    logAuditEvent('OFFER_CREATED', 'OfferCoupon', id, `Created coupon ${normalizedCode} (${offer.title})`);
   };
 
   const updateOffer = (offerId: string, patch: Partial<OfferCouponRecord>) => {
     setOffers((prev) => prev.map((o) => (o.id === offerId ? { ...o, ...patch } : o)));
+    void adminRequest<{ offer?: OfferCouponRecord }>(
+      `/api/admin/offers/${encodeURIComponent(offerId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ).then((res) => {
+      if (res?.offer) {
+        setOffers((prev) => prev.map((o) => (o.id === offerId ? res.offer! : o)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('OFFER_UPDATED', 'OfferCoupon', offerId, `Updated offer ${offerId}`);
   };
 
   const toggleOfferStatus = (offerId: string) => {
     const target = offers.find((o) => o.id === offerId);
     setOffers((prev) => prev.map((o) => (o.id === offerId ? { ...o, isActive: !o.isActive } : o)));
+    void adminRequest<{ offer?: OfferCouponRecord }>(
+      `/api/admin/offers/${encodeURIComponent(offerId)}/toggle`,
+      { method: 'PATCH' }
+    ).then((res) => {
+      if (res?.offer) {
+        setOffers((prev) => prev.map((o) => (o.id === offerId ? res.offer! : o)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('OFFER_TOGGLED', 'OfferCoupon', offerId, `Coupon ${target?.code} set to ${!target?.isActive}`);
   };
 
   const deleteOffer = (offerId: string) => {
     const target = offers.find((o) => o.id === offerId);
     setOffers((prev) => prev.filter((o) => o.id !== offerId));
+    void adminRequest<{ deleted?: boolean }>(
+      `/api/admin/offers/${encodeURIComponent(offerId)}`,
+      { method: 'DELETE' }
+    ).then((res) => {
+      if (!res?.deleted) {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('OFFER_DELETED', 'OfferCoupon', offerId, `Deleted coupon ${target?.code || offerId}`);
   };
 
-  // Support Cases
+  // Support Cases (PostgreSQL-backed)
   const updateSupportCaseStatus = (
     caseId: string,
     status: SupportCaseRecord['status'],
@@ -2364,6 +2743,19 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : c
       )
     );
+    void adminRequest<{ supportCase?: SupportCaseRecord }>(
+      `/api/admin/support-cases/${encodeURIComponent(caseId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status, resolutionNotes, approvedRefundPaise }),
+      }
+    ).then((res) => {
+      if (res?.supportCase) {
+        setSupportCases((prev) => prev.map((c) => (c.id === caseId ? res.supportCase! : c)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent(
       `SUPPORT_CASE_${status}`,
       'SupportCase',
@@ -2374,9 +2766,22 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
-  // Platform Settings
+  // Platform Settings (PostgreSQL-backed)
   const updatePlatformSettings = (patch: Partial<PlatformSettingsRecord>) => {
     setPlatformSettings((prev) => ({ ...prev, ...patch }));
+    void adminRequest<{ platformSettings?: PlatformSettingsRecord }>(
+      '/api/admin/platform-settings',
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ).then((res) => {
+      if (res?.platformSettings) {
+        setPlatformSettings(res.platformSettings);
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('PLATFORM_SETTINGS_UPDATED', 'PlatformSettings', 'global', 'Updated global platform settings', undefined, patch as Record<string, unknown>);
   };
 
@@ -2406,7 +2811,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   };
 
-  // --- EXTENDED ENTERPRISE ADMIN ACTIONS ---
+  // --- EXTENDED ENTERPRISE ADMIN ACTIONS (PostgreSQL-backed) ---
   const toggleCustomerBlock = (customerId: string, block: boolean, reason: string) => {
     setCustomers((prev) =>
       prev.map((c) =>
@@ -2415,6 +2820,19 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : c
       )
     );
+    void adminRequest<{ customer?: AdminCustomerRecord }>(
+      `/api/admin/customers/${encodeURIComponent(customerId)}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ block, reason }),
+      }
+    ).then((res) => {
+      if (res?.customer) {
+        setCustomers((prev) => prev.map((c) => (c.id === customerId ? res.customer! : c)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent(
       block ? 'CUSTOMER_BLOCKED' : 'CUSTOMER_UNBLOCKED',
       'Customer',
@@ -2426,6 +2844,19 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const updateCustomerNotes = (customerId: string, notes: string) => {
     setCustomers((prev) => prev.map((c) => (c.id === customerId ? { ...c, adminNotes: notes } : c)));
+    void adminRequest<{ customer?: AdminCustomerRecord }>(
+      `/api/admin/customers/${encodeURIComponent(customerId)}/notes`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ notes }),
+      }
+    ).then((res) => {
+      if (res?.customer) {
+        setCustomers((prev) => prev.map((c) => (c.id === customerId ? res.customer! : c)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CUSTOMER_NOTES_UPDATED', 'Customer', customerId, 'Updated internal admin notes on buyer profile.');
   };
 
@@ -2460,6 +2891,19 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : p
       )
     );
+    void adminRequest<{ payout?: SellerPayoutRecord }>(
+      `/api/admin/payouts/${encodeURIComponent(payoutId)}/settle`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    ).then((res) => {
+      if (res?.payout) {
+        setPayouts((prev) => prev.map((p) => (p.id === payoutId ? res.payout! : p)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent(
       'SELLER_PAYOUT_SETTLED',
       'SellerPayout',
@@ -2490,6 +2934,16 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : p
       )
     );
+    void adminRequest<{ payout?: SellerPayoutRecord }>(
+      `/api/admin/payouts/${encodeURIComponent(payoutId)}/processing`,
+      { method: 'PATCH' }
+    ).then((res) => {
+      if (res?.payout) {
+        setPayouts((prev) => prev.map((p) => (p.id === payoutId ? res.payout! : p)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('SELLER_PAYOUT_PROCESSING', 'SellerPayout', payoutId, 'Moved payout batch to processing queue.');
   };
 
@@ -2527,6 +2981,19 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : r
       )
     );
+    void adminRequest<{ refund?: RefundLedgerRecord }>(
+      `/api/admin/refunds/${encodeURIComponent(refundId)}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status, reason }),
+      }
+    ).then((res) => {
+      if (res?.refund) {
+        setRefundLedger((prev) => prev.map((r) => (r.id === refundId ? res.refund! : r)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent(
       'REFUND_STATUS_UPDATED',
       'Refund',
@@ -2537,37 +3004,89 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addCmsBanner = (banner: Omit<CmsBannerRecord, 'id'>) => {
-    const created: CmsBannerRecord = { ...banner, id: `bnr_${Date.now()}` };
+    const id = `bnr_${Date.now()}`;
+    const created: CmsBannerRecord = { ...banner, id };
     setCmsBanners((prev) => [created, ...prev]);
+    void adminRequest<{ banner?: CmsBannerRecord }>('/api/admin/cms/banners', {
+      method: 'POST',
+      body: JSON.stringify(created),
+    }).then((res) => {
+      if (res?.banner) {
+        setCmsBanners((prev) => prev.map((b) => (b.id === id ? res.banner! : b)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CMS_BANNER_CREATED', 'CmsBanner', created.id, `Created banner "${created.title}" (${created.placement})`);
   };
 
   const updateCmsBanner = (bannerId: string, patch: Partial<CmsBannerRecord>) => {
     setCmsBanners((prev) => prev.map((b) => (b.id === bannerId ? { ...b, ...patch } : b)));
+    void adminRequest<{ banner?: CmsBannerRecord }>(
+      `/api/admin/cms/banners/${encodeURIComponent(bannerId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ).then((res) => {
+      if (res?.banner) {
+        setCmsBanners((prev) => prev.map((b) => (b.id === bannerId ? res.banner! : b)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CMS_BANNER_UPDATED', 'CmsBanner', bannerId, `Updated CMS banner ${bannerId}`);
   };
 
   const toggleCmsBannerStatus = (bannerId: string) => {
     setCmsBanners((prev) => prev.map((b) => (b.id === bannerId ? { ...b, isActive: !b.isActive } : b)));
+    void adminRequest<{ banner?: CmsBannerRecord }>(
+      `/api/admin/cms/banners/${encodeURIComponent(bannerId)}/toggle`,
+      { method: 'PATCH' }
+    ).then((res) => {
+      if (res?.banner) {
+        setCmsBanners((prev) => prev.map((b) => (b.id === bannerId ? res.banner! : b)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CMS_BANNER_TOGGLED', 'CmsBanner', bannerId, 'Toggled homepage banner visibility.');
   };
 
   const deleteCmsBanner = (bannerId: string) => {
     setCmsBanners((prev) => prev.filter((b) => b.id !== bannerId));
+    void adminRequest<{ deleted?: boolean }>(
+      `/api/admin/cms/banners/${encodeURIComponent(bannerId)}`,
+      { method: 'DELETE' }
+    ).then((res) => {
+      if (!res?.deleted) {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CMS_BANNER_DELETED', 'CmsBanner', bannerId, 'Deleted CMS promotional banner.');
   };
 
   const toggleFeaturedSeller = (sellerId: string) => {
-    setFeaturedSellerIds((prev) => {
-      const exists = prev.includes(sellerId);
-      logAuditEvent(
-        exists ? 'SELLER_UNFEATURED' : 'SELLER_FEATURED',
-        'Seller',
-        sellerId,
-        exists ? 'Removed shop from homepage Featured Stores.' : 'Pinned shop to homepage Featured Stores.'
-      );
-      return exists ? prev.filter((id) => id !== sellerId) : [...prev, sellerId];
+    const exists = featuredSellerIds.includes(sellerId);
+    setFeaturedSellerIds((prev) =>
+      prev.includes(sellerId) ? prev.filter((id) => id !== sellerId) : [...prev, sellerId]
+    );
+    void adminRequest<{ featuredSellerIds?: string[] }>(
+      `/api/admin/cms/featured-sellers/${encodeURIComponent(sellerId)}/toggle`,
+      { method: 'POST' }
+    ).then((res) => {
+      if (Array.isArray(res?.featuredSellerIds)) {
+        setFeaturedSellerIds(res.featuredSellerIds);
+      } else {
+        void hydrateFromDatabase();
+      }
     });
+    logAuditEvent(
+      exists ? 'SELLER_UNFEATURED' : 'SELLER_FEATURED',
+      'Seller',
+      sellerId,
+      exists ? 'Removed shop from homepage Featured Stores.' : 'Pinned shop to homepage Featured Stores.'
+    );
   };
 
   const updateCmsPolicy = (
@@ -2581,6 +3100,19 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : p
       )
     );
+    void adminRequest<{ policy?: CmsPolicyPageRecord }>(
+      `/api/admin/cms/policies/${encodeURIComponent(policyId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ).then((res) => {
+      if (res?.policy) {
+        setCmsPolicies((prev) => prev.map((p) => (p.id === policyId ? res.policy! : p)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CMS_POLICY_UPDATED', 'CmsPolicy', policyId, `Published policy revision ${patch.version}`);
   };
 
@@ -2588,25 +3120,57 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setReviews((prev) =>
       prev.map((r) => (r.id === reviewId ? { ...r, status, moderationNotes: notes || r.moderationNotes } : r))
     );
+    void adminRequest<{ review?: CustomerReviewRecord }>(
+      `/api/admin/reviews/${encodeURIComponent(reviewId)}/moderate`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status, notes }),
+      }
+    ).then((res) => {
+      if (res?.review) {
+        setReviews((prev) => prev.map((r) => (r.id === reviewId ? res.review! : r)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('REVIEW_MODERATED', 'CustomerReview', reviewId, `Changed review status to ${status}`, notes);
   };
 
   const deleteReview = (reviewId: string) => {
     setReviews((prev) => prev.filter((r) => r.id !== reviewId));
+    void adminRequest<{ deleted?: boolean }>(
+      `/api/admin/reviews/${encodeURIComponent(reviewId)}`,
+      { method: 'DELETE' }
+    ).then((res) => {
+      if (!res?.deleted) {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('REVIEW_DELETED', 'CustomerReview', reviewId, 'Removed abusive/spam customer review.');
   };
 
   const sendBroadcast = (
     broadcast: Omit<BroadcastMessageRecord, 'id' | 'sentAt' | 'createdBy' | 'deliveredCount'>
   ) => {
+    const id = `brd_${Date.now()}`;
     const created: BroadcastMessageRecord = {
       ...broadcast,
-      id: `brd_${Date.now()}`,
+      id,
       deliveredCount: broadcast.status === 'SENT' ? Math.max(1, Math.round(broadcast.estimatedReach * 0.97)) : 0,
       sentAt: new Date().toISOString(),
       createdBy: currentAdmin.name,
     };
     setBroadcasts((prev) => [created, ...prev]);
+    void adminRequest<{ broadcast?: BroadcastMessageRecord }>('/api/admin/broadcasts', {
+      method: 'POST',
+      body: JSON.stringify({ ...broadcast, id }),
+    }).then((res) => {
+      if (res?.broadcast) {
+        setBroadcasts((prev) => prev.map((b) => (b.id === id ? res.broadcast! : b)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent(
       'BROADCAST_DISPATCHED',
       'Broadcast',
@@ -2617,48 +3181,140 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deleteBroadcast = (broadcastId: string) => {
     setBroadcasts((prev) => prev.filter((b) => b.id !== broadcastId));
+    void adminRequest<{ deleted?: boolean }>(
+      `/api/admin/broadcasts/${encodeURIComponent(broadcastId)}`,
+      { method: 'DELETE' }
+    ).then((res) => {
+      if (!res?.deleted) {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('BROADCAST_DELETED', 'Broadcast', broadcastId, 'Deleted broadcast entry.');
   };
 
   const addTaxSlab = (slab: Omit<TaxSlabRecord, 'id'>) => {
-    const created: TaxSlabRecord = { ...slab, id: `tax_${Date.now()}` };
+    const id = `tax_${Date.now()}`;
+    const created: TaxSlabRecord = { ...slab, id };
     setTaxSlabs((prev) => [created, ...prev]);
+    void adminRequest<{ taxSlab?: TaxSlabRecord }>('/api/admin/tax-slabs', {
+      method: 'POST',
+      body: JSON.stringify(created),
+    }).then((res) => {
+      if (res?.taxSlab) {
+        setTaxSlabs((prev) => prev.map((t) => (t.id === id ? res.taxSlab! : t)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('TAX_SLAB_CREATED', 'TaxSlab', created.id, `Added ${created.gstPercent}% GST slab "${created.name}"`);
   };
 
   const updateTaxSlab = (slabId: string, patch: Partial<TaxSlabRecord>) => {
     setTaxSlabs((prev) => prev.map((t) => (t.id === slabId ? { ...t, ...patch } : t)));
+    void adminRequest<{ taxSlab?: TaxSlabRecord }>(
+      `/api/admin/tax-slabs/${encodeURIComponent(slabId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ).then((res) => {
+      if (res?.taxSlab) {
+        setTaxSlabs((prev) => prev.map((t) => (t.id === slabId ? res.taxSlab! : t)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('TAX_SLAB_UPDATED', 'TaxSlab', slabId, `Updated GST slab ${slabId}`);
   };
 
   const toggleTaxSlabStatus = (slabId: string) => {
     setTaxSlabs((prev) => prev.map((t) => (t.id === slabId ? { ...t, isActive: !t.isActive } : t)));
+    void adminRequest<{ taxSlab?: TaxSlabRecord }>(
+      `/api/admin/tax-slabs/${encodeURIComponent(slabId)}/toggle`,
+      { method: 'PATCH' }
+    ).then((res) => {
+      if (res?.taxSlab) {
+        setTaxSlabs((prev) => prev.map((t) => (t.id === slabId ? res.taxSlab! : t)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('TAX_SLAB_TOGGLED', 'TaxSlab', slabId, 'Toggled GST slab status.');
   };
 
   const deleteTaxSlab = (slabId: string) => {
     setTaxSlabs((prev) => prev.filter((t) => t.id !== slabId));
+    void adminRequest<{ deleted?: boolean }>(
+      `/api/admin/tax-slabs/${encodeURIComponent(slabId)}`,
+      { method: 'DELETE' }
+    ).then((res) => {
+      if (!res?.deleted) {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('TAX_SLAB_DELETED', 'TaxSlab', slabId, 'Deleted GST slab.');
   };
 
   const addCancellationRule = (rule: Omit<CancellationPolicyRuleRecord, 'id'>) => {
-    const created: CancellationPolicyRuleRecord = { ...rule, id: `can_${Date.now()}` };
+    const id = `can_${Date.now()}`;
+    const created: CancellationPolicyRuleRecord = { ...rule, id, code: rule.code.trim().toUpperCase() };
     setCancellationRules((prev) => [created, ...prev]);
+    void adminRequest<{ cancellationRule?: CancellationPolicyRuleRecord }>('/api/admin/cancellation-rules', {
+      method: 'POST',
+      body: JSON.stringify(created),
+    }).then((res) => {
+      if (res?.cancellationRule) {
+        setCancellationRules((prev) => prev.map((r) => (r.id === id ? res.cancellationRule! : r)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CANCELLATION_RULE_CREATED', 'CancellationPolicy', created.id, `Added rule "${created.code}"`);
   };
 
   const updateCancellationRule = (ruleId: string, patch: Partial<CancellationPolicyRuleRecord>) => {
     setCancellationRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)));
+    void adminRequest<{ cancellationRule?: CancellationPolicyRuleRecord }>(
+      `/api/admin/cancellation-rules/${encodeURIComponent(ruleId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }
+    ).then((res) => {
+      if (res?.cancellationRule) {
+        setCancellationRules((prev) => prev.map((r) => (r.id === ruleId ? res.cancellationRule! : r)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CANCELLATION_RULE_UPDATED', 'CancellationPolicy', ruleId, `Updated cancellation rule ${ruleId}`);
   };
 
   const toggleCancellationRuleStatus = (ruleId: string) => {
     setCancellationRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, isActive: !r.isActive } : r)));
+    void adminRequest<{ cancellationRule?: CancellationPolicyRuleRecord }>(
+      `/api/admin/cancellation-rules/${encodeURIComponent(ruleId)}/toggle`,
+      { method: 'PATCH' }
+    ).then((res) => {
+      if (res?.cancellationRule) {
+        setCancellationRules((prev) => prev.map((r) => (r.id === ruleId ? res.cancellationRule! : r)));
+      } else {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CANCELLATION_RULE_TOGGLED', 'CancellationPolicy', ruleId, 'Toggled cancellation rule.');
   };
 
   const deleteCancellationRule = (ruleId: string) => {
     setCancellationRules((prev) => prev.filter((r) => r.id !== ruleId));
+    void adminRequest<{ deleted?: boolean }>(
+      `/api/admin/cancellation-rules/${encodeURIComponent(ruleId)}`,
+      { method: 'DELETE' }
+    ).then((res) => {
+      if (!res?.deleted) {
+        void hydrateFromDatabase();
+      }
+    });
     logAuditEvent('CANCELLATION_RULE_DELETED', 'CancellationPolicy', ruleId, 'Deleted cancellation rule.');
   };
 
@@ -2727,21 +3383,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAdminUsers(INITIAL_ADMIN_USERS);
     setCurrentAdminId(INITIAL_ADMIN_USERS[0].id);
     setRolePermissions(INITIAL_ROLE_PERMISSIONS);
-    setFeeRules(INITIAL_FEE_RULES);
-    setOffers(INITIAL_OFFERS);
-    setSupportCases(INITIAL_SUPPORT_CASES);
-    setPlatformSettings(INITIAL_PLATFORM_SETTINGS);
-    setCustomers(INITIAL_CUSTOMERS);
-    setPayouts(INITIAL_PAYOUTS);
-    setPaymentTransactions(INITIAL_PAYMENT_TRANSACTIONS);
-    setRefundLedger(INITIAL_REFUNDS);
-    setCmsBanners(INITIAL_CMS_BANNERS);
-    setFeaturedSellerIds(['sel_1', 'sel_2']);
-    setCmsPolicies(INITIAL_CMS_POLICIES);
-    setReviews(INITIAL_REVIEWS);
-    setBroadcasts(INITIAL_BROADCASTS);
-    setTaxSlabs(INITIAL_TAX_SLABS);
-    setCancellationRules(INITIAL_CANCELLATION_RULES);
     void hydrateFromDatabase();
   };
 
@@ -2827,6 +3468,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         moderateProduct,
         updateProductInventory,
         toggleProductAvailability,
+        sellerCreateProduct,
+        sellerUpdateProduct,
+        sellerUpdateProductInventory,
+        sellerToggleProductAvailability,
         serviceAreas,
         toggleServiceAreaStatus,
         addServiceArea,
@@ -2895,6 +3540,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         logAuditEvent,
         clearAuditLogs,
         resetAdminData,
+        adminOrders,
+        refreshAdminOrders,
+        lastApiError,
+        clearApiError,
       }}
     >
       {children}

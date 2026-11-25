@@ -58,8 +58,8 @@ export const SellerAddProductModal: React.FC<SellerAddProductModalProps> = ({
     optionGroups,
     packagingMasters,
     availabilityConfigs,
-    addProduct,
-    updateProduct,
+    sellerCreateProduct,
+    sellerUpdateProduct,
   } = useAdmin();
 
   const vertical = seller.primaryVertical === 'FOOD' ? 'FOOD' : 'GROCERY';
@@ -421,17 +421,19 @@ export const SellerAddProductModal: React.FC<SellerAddProductModalProps> = ({
       attributes: mergedAttributes,
       variants,
       optionGroupIds: selectedOptionGroupIds,
-      moderationStatus: 'APPROVED',
-      moderationNotes: 'Added by verified seller using centralized GramBazaar Masters.',
+      moderationStatus: editingProduct ? editingProduct.moderationStatus : 'PENDING_REVIEW',
+      moderationNotes: editingProduct
+        ? editingProduct.moderationNotes
+        : 'Submitted by verified seller using centralized GramBazaar Masters.',
       isActive: true,
       isAvailable: true,
     };
 
     if (editingProduct) {
-      updateProduct(editingProduct.id, payload);
+      sellerUpdateProduct(seller.id, editingProduct.id, payload);
       onSaved(payload.name, true);
     } else {
-      addProduct(payload);
+      sellerCreateProduct(seller.id, payload);
       onSaved(payload.name, false);
     }
     onClose();

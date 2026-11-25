@@ -108,9 +108,9 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
     packagingMasters,
     availabilityConfigs,
     products: adminProducts,
-    updateProduct,
-    toggleProductAvailability,
-    updateProductInventory,
+    sellerUpdateProduct,
+    sellerToggleProductAvailability,
+    sellerUpdateProductInventory,
   } = useAdmin();
 
   const vertical = activeSeller.primaryVertical === 'FOOD' ? 'FOOD' : 'GROCERY';
@@ -402,7 +402,7 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
   const handleToggleItemAvailability = (item: DisplaySellerItem) => {
     const nextAvailable = !item.isAvailable;
     if (item.source === 'MASTER_PRODUCT') {
-      toggleProductAvailability(item.id);
+      sellerToggleProductAvailability(activeSeller.id, item.id);
     } else {
       setAvailabilityOverrides((prev) => ({
         ...prev,
@@ -426,12 +426,12 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
 
     if (item.source === 'MASTER_PRODUCT') {
       if (shouldBeAvailable !== item.isAvailable) {
-        updateProduct(item.id, {
+        sellerUpdateProduct(activeSeller.id, item.id, {
           stockQuantity: nextQty,
           isAvailable: shouldBeAvailable,
         });
       } else {
-        updateProductInventory(item.id, nextQty);
+        sellerUpdateProductInventory(activeSeller.id, item.id, nextQty);
       }
     } else {
       setStockOverrides((prev) => ({ ...prev, [item.id]: nextQty }));
@@ -577,7 +577,7 @@ export const SellerCatalogView: React.FC<SellerCatalogViewProps> = ({
         if (payload.availabilityAction !== 'UNCHANGED' || nextAvailable !== item.isAvailable) {
           patch.isAvailable = nextAvailable;
         }
-        updateProduct(item.id, patch);
+        sellerUpdateProduct(activeSeller.id, item.id, patch);
       } else {
         if (payload.applyPrice) nextPriceOverrides[item.id] = nextPricePaise;
         if (payload.applyStock) nextStockOverrides[item.id] = nextStock;

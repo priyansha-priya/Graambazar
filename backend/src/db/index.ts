@@ -1,11 +1,7 @@
-import dotenv from 'dotenv';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
+import '../config/env.ts';
 import * as schema from './schema.ts';
-
-// Load .env.local first (if present), then .env; runtime Cloud SQL env vars take precedence when already injected
-dotenv.config({ path: '.env.local' });
-dotenv.config();
 
 declare global {
   var _postgresPool: Pool | undefined;
@@ -41,6 +37,14 @@ export const createPool = () => {
   return global._postgresPool;
 };
 
-const pool = createPool();
+export const pool = createPool();
 
 export const db = drizzle(pool, { schema });
+
+export async function closeDatabasePool(): Promise<void> {
+  if (global._postgresPool) {
+    const activePool = global._postgresPool;
+    global._postgresPool = undefined;
+    await activePool.end();
+  }
+}

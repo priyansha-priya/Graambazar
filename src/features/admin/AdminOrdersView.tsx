@@ -65,13 +65,15 @@ const PAGE_SIZE = 8;
 
 export const AdminOrdersView: React.FC = () => {
   const {
-    orders,
+    orders: localOrders,
     transitionOrder,
     adminCancelOrder,
     recordOrderReturn,
     processOrderRefund,
   } = useOrders();
   const {
+    adminOrders,
+    refreshAdminOrders,
     logAuditEvent,
     serviceAreas,
     verticalConfigs,
@@ -79,6 +81,16 @@ export const AdminOrdersView: React.FC = () => {
     hasPermission,
     currentAdmin,
   } = useAdmin();
+
+  // Combine global PostgreSQL orders (when signed in as Admin) with local session orders
+  const orders = useMemo(() => {
+    const byKey = new Map<string, Order>();
+    localOrders.forEach((o) => byKey.set(o.orderNumber || o.id, o));
+    adminOrders.forEach((o) => byKey.set(o.orderNumber || o.id, o));
+    return Array.from(byKey.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }, [adminOrders, localOrders]);
 
   const canManage = hasPermission('ORDERS', 'manage');
   const canExport = hasPermission('ORDERS', 'export');
@@ -142,6 +154,7 @@ export const AdminOrdersView: React.FC = () => {
   const handleStatusOverride = (orderId: string, nextStatus: OrderStatus, reason?: string) => {
     if (!canManage) return;
     transitionOrder(orderId, nextStatus, reason, 'ADMIN');
+    setTimeout(() => void refreshAdminOrders(), 450);
     logAuditEvent(
       'ORDER_STATUS_OVERRIDE',
       'Order',
@@ -177,6 +190,7 @@ export const AdminOrdersView: React.FC = () => {
   const handleAdminCancelOrder = (orderId: string, payload: AdminCancelOrderPayload) => {
     if (!canManage) return;
     adminCancelOrder(orderId, payload);
+    setTimeout(() => void refreshAdminOrders(), 450);
     logAuditEvent(
       'ORDER_CANCELLED',
       'Order',
@@ -190,6 +204,7 @@ export const AdminOrdersView: React.FC = () => {
   const handleRecordReturn = (orderId: string, payload: RecordOrderReturnPayload) => {
     if (!canManage) return;
     recordOrderReturn(orderId, payload);
+    setTimeout(() => void refreshAdminOrders(), 450);
     logAuditEvent(
       'ORDER_RETURN_UPDATED',
       'Order',
@@ -203,6 +218,7 @@ export const AdminOrdersView: React.FC = () => {
   const handleProcessRefund = (orderId: string, payload: ProcessOrderRefundPayload) => {
     if (!canManage) return;
     processOrderRefund(orderId, payload);
+    setTimeout(() => void refreshAdminOrders(), 450);
     logAuditEvent(
       'ORDER_REFUND_PROCESSED',
       'Order',

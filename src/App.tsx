@@ -160,7 +160,7 @@ type UserPortalRole = 'CUSTOMER' | 'SELLER' | 'ADMIN';
 type CustomerView = 'MARKETPLACE' | 'CART' | 'CHECKOUT' | 'ORDER_TRACKING' | 'ORDER_HISTORY' | 'MY_UDHAR';
 
 function MainMarketplaceApp() {
-  const { firebaseUser, dbProfile, signOutUser } = useAuth();
+  const { firebaseUser, dbProfile, authLoading, signInWithGoogle, signOutUser } = useAuth();
   const { activeVillage, selectedLandmark, getDeliveryRelationship } = useVillage();
   const { items: cartItems, seller: cartSeller, addItem, forceAddItem, itemSubtotalPaise } = useCart();
   const {
@@ -182,6 +182,8 @@ function MainMarketplaceApp() {
     products: adminProducts,
     categories: adminCategories,
     units: adminUnits,
+    lastApiError,
+    clearApiError,
   } = useAdmin();
 
   // Merge Seller-created Master products into Customer Storefront lists live
@@ -895,6 +897,47 @@ function MainMarketplaceApp() {
                       ]
                 }
               />
+
+              {(!firebaseUser ||
+                !['SUPER_ADMIN', 'ADMIN_OPS', 'ADMIN_FINANCE', 'ADMIN_SUPPORT'].includes(
+                  dbProfile?.role || ''
+                )) && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start sm:items-center gap-2.5 text-xs text-amber-900">
+                    <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5 sm:mt-0" />
+                    <p className="font-medium">
+                      {!firebaseUser
+                        ? 'Admin Google account se sign in karein taaki sabhi changes aur private admin data save ho sakein.'
+                        : `Signed in as ${firebaseUser.email || 'user'} (${dbProfile?.role || 'CUSTOMER'}). Admin changes ke liye Super Admin account se sign in karein.`}
+                    </p>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={authLoading}
+                    onClick={() => void signInWithGoogle()}
+                  >
+                    {authLoading ? 'Signing in...' : 'Sign in with Google'}
+                  </Button>
+                </div>
+              )}
+
+              {lastApiError && (
+                <div
+                  role="alert"
+                  className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs font-medium"
+                >
+                  <span>{lastApiError}</span>
+                  <button
+                    type="button"
+                    onClick={clearApiError}
+                    className="p-1 rounded-lg hover:bg-rose-100 text-rose-700 cursor-pointer"
+                    aria-label="Dismiss error"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
 
               {adminView === 'DASHBOARD' && (
                 <AdminDashboardView onNavigate={setAdminView} />

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   TrendingUp,
   BarChart3,
@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Filter,
 } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 import { useSeller } from '../../contexts/SellerContext';
 import { useOrders } from '../../contexts/OrderContext';
 import { formatINR } from '../../utils/currency';
@@ -44,7 +45,35 @@ interface DailyStat {
   repeatCustomers: number;
 }
 
+interface LiveSellerAnalytics {
+  sellerId: string;
+  days: number;
+  summary: {
+    totalOrders: number;
+    completedOrders: number;
+    pendingOrders: number;
+    cancelledOrders: number;
+    deliveredRevenuePaise: number;
+    avgOrderValuePaise: number;
+    codPendingPaise: number;
+    uniqueCustomers: number;
+  };
+  paymentBreakdown: Record<string, { count: number; amountPaise: number }>;
+  fulfilmentBreakdown: Record<string, number>;
+  topProducts: Array<{
+    name: string;
+    unitsSold: number;
+    revenuePaise: number;
+  }>;
+  dailySeries: Array<{
+    dateKey: string;
+    orders: number;
+    revenuePaise: number;
+  }>;
+}
+
 export const SellerAnalyticsView: React.FC = () => {
+  const { firebaseUser, getAuthHeaders } = useAuth();
   const { activeSeller, allSellers, setActiveSellerId } = useSeller();
   const { orders } = useOrders();
 
@@ -54,11 +83,66 @@ export const SellerAnalyticsView: React.FC = () => {
   const [hoveredDay, setHoveredDay] = useState<DailyStat | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+  const [liveAnalytics, setLiveAnalytics] = useState<LiveSellerAnalytics | null>(null);
 
-  // Generate deterministic realistic time-series data based on active seller & range
+  useEffect(() => {
+    let active = true;
+    const daysCount = timeRange === '7D' ? 7 : timeRange === '14D' ? 14 : 30;
+    const loadAnalytics = async () => {
+      if (!firebaseUser) {
+        if (active) setLiveAnalytics(null);
+        return;
+      }
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers?.Authorization) return;
+        const res = await fetch(
+          `/api/seller/${encodeURIComponent(activeSeller.id)}/analytics?days=${daysCount}`,
+          { headers }
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { analytics?: LiveSellerAnalytics };
+        if (active && data.analytics) {
+          setLiveAnalytics(data.analytics);
+        }
+      } catch {
+        // Fallback smoothly if analytics endpoint unavailable
+      }
+    };
+    void loadAnalytics();
+    return () => {
+      active = false;
+    };
+  }, [activeSeller.id, timeRange, firebaseUser, getAuthHeaders]);
+
+  const hasLiveDbOrders = Boolean(liveAnalytics && liveAnalytics.summary.totalOrders > 0);
+
+  // Generate deterministic realistic time-series data (overridden seamlessly by live PostgreSQL series when DB orders exist)
   const dailyData = useMemo<DailyStat[]>(() => {
     const daysCount = timeRange === '7D' ? 7 : timeRange === '14D' ? 14 : 30;
     const isFood = activeSeller.primaryVertical === 'FOOD';
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    if (hasLiveDbOrders && liveAnalytics && liveAnalytics.dailySeries.length > 0) {
+      return liveAnalytics.dailySeries.map((pt) => {
+        const dt = new Date(`${pt.dateKey}T00:00:00Z`);
+        const dateStr = dt.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+        const shortDay = dayNames[dt.getUTCDay()];
+        const newCust = Math.max(0, Math.round(pt.orders * 0.35));
+        const repeatCust = Math.max(0, pt.orders - newCust);
+        return {
+          dateStr,
+          shortDay,
+          orders: pt.orders,
+          revenuePaise: pt.revenuePaise,
+          foodOrders: isFood ? pt.orders : 0,
+          groceryOrders: isFood ? 0 : pt.orders,
+          newCustomers: newCust,
+          repeatCustomers: repeatCust,
+        };
+      });
+    }
+
     const baseMultiplier = isFood ? 1.2 : 1.0;
 
     const data: DailyStat[] = [];
@@ -99,7 +183,7 @@ export const SellerAnalyticsView: React.FC = () => {
       });
     }
     return data;
-  }, [timeRange, activeSeller.id, activeSeller.primaryVertical]);
+  }, [timeRange, activeSeller.id, activeSeller.primaryVertical, hasLiveDbOrders, liveAnalytics]);
 
   // Aggregate metrics
   const totalOrders = useMemo(
@@ -141,8 +225,24 @@ export const SellerAnalyticsView: React.FC = () => {
     return Math.max(...dailyData.map((d) => d.revenuePaise), 100000);
   }, [dailyData, chartMetric]);
 
-  // Top-selling products data specific to store vertical
+  // Top-selling products data (uses live PostgreSQL aggregation when DB orders exist)
   const topProducts = useMemo(() => {
+    if (hasLiveDbOrders && liveAnalytics && liveAnalytics.topProducts.length > 0) {
+      const totalTopRev = liveAnalytics.topProducts.reduce((s, p) => s + p.revenuePaise, 0) || 1;
+      return liveAnalytics.topProducts.map((p, idx) => ({
+        id: `live_tp_${idx}`,
+        name: p.name,
+        hindiName: activeSeller.primaryVertical === 'FOOD' ? 'लोकप्रिय व्यंजन' : 'लोकप्रिय उत्पाद',
+        category: activeSeller.primaryVertical === 'FOOD' ? 'Store Menu' : 'Kirana Essentials',
+        unitsSold: p.unitsSold,
+        unitLabel: 'Units',
+        pricePaise: p.unitsSold > 0 ? Math.round(p.revenuePaise / p.unitsSold) : p.revenuePaise,
+        revenuePaise: p.revenuePaise,
+        sharePercentage: Math.max(5, Math.round((p.revenuePaise / totalTopRev) * 100)),
+        stockStatus: 'AVAILABLE',
+      }));
+    }
+
     const isFood = activeSeller.primaryVertical === 'FOOD';
     if (isFood) {
       return [
@@ -271,7 +371,7 @@ export const SellerAnalyticsView: React.FC = () => {
         },
       ];
     }
-  }, [activeSeller.primaryVertical, timeRange]);
+  }, [activeSeller.primaryVertical, timeRange, hasLiveDbOrders, liveAnalytics]);
 
   const sortedTopProducts = useMemo(() => {
     return [...topProducts].sort((a, b) =>
@@ -298,12 +398,40 @@ export const SellerAnalyticsView: React.FC = () => {
     { label: 'Dinner & Dhaba Rush (Peak)', time: '07:30 PM - 10:00 PM', share: 34, color: 'bg-[#218838]' },
   ];
 
-  // Payment Breakdown
-  const paymentBreakdown = [
-    { method: 'Direct Seller UPI QR', share: 56, icon: <QrCode className="w-3.5 h-3.5" />, note: 'Instant zero-fee settlement' },
-    { method: 'Cash on Delivery (COD)', share: 34, icon: <Wallet className="w-3.5 h-3.5" />, note: 'Collected by in-house runner' },
-    { method: 'Customer Udhari Ledger', share: 10, icon: <ShoppingBag className="w-3.5 h-3.5" />, note: 'Logged in digital khata' },
-  ];
+  // Payment Breakdown (live PostgreSQL distribution when orders exist)
+  const paymentBreakdown = useMemo(() => {
+    if (hasLiveDbOrders && liveAnalytics) {
+      const totalCount = liveAnalytics.summary.totalOrders || 1;
+      const upiCount = liveAnalytics.paymentBreakdown['SELLER_UPI']?.count || 0;
+      const codCount = liveAnalytics.paymentBreakdown['COD']?.count || 0;
+      const udharCount = liveAnalytics.paymentBreakdown['UDHAR']?.count || 0;
+      return [
+        {
+          method: 'Direct Seller UPI QR',
+          share: Math.round((upiCount / totalCount) * 100),
+          icon: <QrCode className="w-3.5 h-3.5" />,
+          note: `${upiCount} orders • Instant zero-fee settlement`,
+        },
+        {
+          method: 'Cash on Delivery (COD)',
+          share: Math.round((codCount / totalCount) * 100),
+          icon: <Wallet className="w-3.5 h-3.5" />,
+          note: `${codCount} orders • Collected by in-house runner`,
+        },
+        {
+          method: 'Customer Udhari Ledger',
+          share: Math.round((udharCount / totalCount) * 100),
+          icon: <ShoppingBag className="w-3.5 h-3.5" />,
+          note: `${udharCount} orders • Logged in digital khata`,
+        },
+      ];
+    }
+    return [
+      { method: 'Direct Seller UPI QR', share: 56, icon: <QrCode className="w-3.5 h-3.5" />, note: 'Instant zero-fee settlement' },
+      { method: 'Cash on Delivery (COD)', share: 34, icon: <Wallet className="w-3.5 h-3.5" />, note: 'Collected by in-house runner' },
+      { method: 'Customer Udhari Ledger', share: 10, icon: <ShoppingBag className="w-3.5 h-3.5" />, note: 'Logged in digital khata' },
+    ];
+  }, [hasLiveDbOrders, liveAnalytics]);
 
   const handleExportCSV = () => {
     setIsExporting(true);

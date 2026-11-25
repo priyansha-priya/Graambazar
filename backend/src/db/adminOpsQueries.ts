@@ -948,6 +948,18 @@ export async function listAllAdminOrders() {
         reason: h.reason ?? undefined,
         timestamp: h.createdAt.toISOString(),
       })),
+      cancellation: safeJsonParse<Record<string, unknown> | undefined>(
+        ord.cancellationJson,
+        undefined
+      ),
+      returnInfo: safeJsonParse<Record<string, unknown> | undefined>(
+        ord.returnInfoJson,
+        undefined
+      ),
+      refundInfo: safeJsonParse<Record<string, unknown> | undefined>(
+        ord.refundInfoJson,
+        undefined
+      ),
       createdAt: ord.createdAt.toISOString(),
       updatedAt: ord.updatedAt.toISOString(),
     });

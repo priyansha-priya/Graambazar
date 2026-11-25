@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useSeller } from '../../contexts/SellerContext';
 import { useOrders } from '../../contexts/OrderContext';
 import { formatINR } from '../../utils/currency';
@@ -30,7 +30,11 @@ export const SellerDashboardView: React.FC<SellerDashboardViewProps> = ({
   onOpenAnalytics,
 }) => {
   const { activeSeller, allSellers, setActiveSellerId, toggleShopOpenState, runners } = useSeller();
-  const { orders } = useOrders();
+  const { orders, refreshSellerOrders } = useOrders();
+
+  useEffect(() => {
+    void refreshSellerOrders(activeSeller.id);
+  }, [activeSeller.id]);
 
   const sellerOrders = orders.filter((o) => o.sellerId === activeSeller.id);
   const pendingOrders = sellerOrders.filter((o) => ['placed', 'accepted', 'preparing'].includes(o.status));

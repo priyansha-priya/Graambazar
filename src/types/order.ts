@@ -154,6 +154,7 @@ export interface Order {
   acceptWindowSeconds?: number;
   acceptDeadlineAt?: string;
   acceptedAt?: string;
+  assignedRunnerId?: string;
   assignedRunnerName?: string;
   assignedRunnerPhone?: string;
   cancellation?: OrderCancellationInfo;

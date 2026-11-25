@@ -36,6 +36,8 @@ export interface Seller {
   packagingFeePaise: number;
   deliveryFeePaise: number;
   operatingHours: OperatingHours;
+  openingHoursText?: string;
+  upiId?: string;
   fssaiNumber?: string;
   bannerUrl?: string;
   rating: number;

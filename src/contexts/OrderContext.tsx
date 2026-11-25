@@ -96,6 +96,7 @@ interface OrderContextType {
   adminCancelOrder: (orderId: string, payload: AdminCancelOrderPayload) => void;
   recordOrderReturn: (orderId: string, payload: RecordOrderReturnPayload) => void;
   processOrderRefund: (orderId: string, payload: ProcessOrderRefundPayload) => void;
+  refreshSellerOrders: (sellerCode: string) => Promise<void>;
 }
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);
@@ -1744,26 +1745,29 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       })
     );
 
-    const targetOrder = orders.find((o) => o.id === orderId);
-    if (targetOrder) {
-      void (async () => {
-        try {
-          const headers = await getAuthHeaders();
-          if (!headers) return;
-          await fetch(`/api/orders/${encodeURIComponent(targetOrder.orderNumber)}/status`, {
-            method: 'PATCH',
-            headers,
-            body: JSON.stringify({
-              status: nextStatus,
-              actorRole,
-              reason: reason || `Status advanced to ${nextStatus}`,
-            }),
-          });
-        } catch {
-          // Ignore transient network errors
-        }
-      })();
-    }
+    const targetOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const orderNumber = targetOrder?.orderNumber || orderId;
+    const isSellerAction = actorRole === 'SELLER' && Boolean(targetOrder?.sellerId);
+    void (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) return;
+        const endpoint = isSellerAction
+          ? `/api/seller/${encodeURIComponent(targetOrder!.sellerId)}/orders/${encodeURIComponent(orderNumber)}/status`
+          : `/api/orders/${encodeURIComponent(orderNumber)}/status`;
+        await fetch(endpoint, {
+          method: 'PATCH',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: nextStatus,
+            actorRole,
+            reason: reason || `Status advanced to ${nextStatus}`,
+          }),
+        });
+      } catch {
+        // Ignore transient network errors
+      }
+    })();
 
     if (nextStatus !== 'placed' && nextStatus !== 'pending') {
       setSellerNotifications((prev) =>
@@ -1775,9 +1779,12 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
   const adminCancelOrder = (orderId: string, payload: AdminCancelOrderPayload) => {
     const timestamp = new Date().toISOString();
+    const targetOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const orderNumber = targetOrder?.orderNumber || orderId;
+
     setOrders((prev) =>
       prev.map((o) => {
-        if (o.id !== orderId) return o;
+        if (o.id !== orderId && o.orderNumber !== orderId) return o;
         const cancelEvent: OrderEvent = {
           id: `ev_admin_cancel_${Date.now()}`,
           orderId,
@@ -1806,13 +1813,30 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         };
       })
     );
+
+    void (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) return;
+        await fetch(`/api/admin/orders/${encodeURIComponent(orderNumber)}/cancel`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // Ignore transient network errors
+      }
+    })();
   };
 
   const recordOrderReturn = (orderId: string, payload: RecordOrderReturnPayload) => {
     const timestamp = new Date().toISOString();
+    const targetOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const orderNumber = targetOrder?.orderNumber || orderId;
+
     setOrders((prev) =>
       prev.map((o) => {
-        if (o.id !== orderId) return o;
+        if (o.id !== orderId && o.orderNumber !== orderId) return o;
 
         const returnedQtyMap = new Map<string, number>();
         payload.returnedItems.forEach((ri) => {
@@ -1855,13 +1879,30 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         };
       })
     );
+
+    void (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) return;
+        await fetch(`/api/admin/orders/${encodeURIComponent(orderNumber)}/return`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // Ignore transient network errors
+      }
+    })();
   };
 
   const processOrderRefund = (orderId: string, payload: ProcessOrderRefundPayload) => {
     const timestamp = new Date().toISOString();
+    const targetOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const orderNumber = targetOrder?.orderNumber || orderId;
+
     setOrders((prev) =>
       prev.map((o) => {
-        if (o.id !== orderId) return o;
+        if (o.id !== orderId && o.orderNumber !== orderId) return o;
 
         const isCompleted = payload.status === 'COMPLETED';
         const isFullRefund = payload.amountPaise >= o.totalPaise;
@@ -1915,6 +1956,53 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         };
       })
     );
+
+    void (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) return;
+        await fetch(`/api/admin/orders/${encodeURIComponent(orderNumber)}/refund`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // Ignore transient network errors
+      }
+    })();
+  };
+
+  const refreshSellerOrders = async (sellerCode: string): Promise<void> => {
+    if (!sellerCode) return;
+    try {
+      const headers = await getAuthHeaders();
+      if (!headers?.Authorization) return;
+      const res = await fetch(`/api/seller/${encodeURIComponent(sellerCode)}/orders`, {
+        headers,
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { orders?: Order[] };
+      if (!Array.isArray(data.orders) || data.orders.length === 0) return;
+      setOrders((prev) => {
+        const dbByOrderNumber = new Map<string, Order>();
+        for (const o of data.orders!) {
+          dbByOrderNumber.set(o.orderNumber, {
+            ...o,
+            sellerPhone: o.sellerPhone || '',
+          });
+        }
+        const mergedExisting = prev.map((existing) =>
+          dbByOrderNumber.has(existing.orderNumber)
+            ? { ...existing, ...dbByOrderNumber.get(existing.orderNumber)! }
+            : existing
+        );
+        const existingNumbers = new Set(prev.map((o) => o.orderNumber));
+        const brandNew = data.orders!.filter((o) => !existingNumbers.has(o.orderNumber));
+        return [...brandNew, ...mergedExisting];
+      });
+    } catch {
+      // Retain local/cached orders when offline or unauthenticated
+    }
   };
 
   return (
@@ -1936,6 +2024,7 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         adminCancelOrder,
         recordOrderReturn,
         processOrderRefund,
+        refreshSellerOrders,
       }}
     >
       {children}
