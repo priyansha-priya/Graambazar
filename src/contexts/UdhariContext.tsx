@@ -1,12 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import {
   CustomerCreditProfile,
   CreditLedgerEntry,
-  CreditRepayment,
   CreditDispute,
   RepaymentMethod,
 } from '../types/credit';
 import { useSeller } from './SellerContext';
+import { useAuth } from './AuthContext';
 
 interface UdhariContextType {
   isShopCreditEnabled: boolean;
@@ -56,166 +56,95 @@ const UdhariContext = createContext<UdhariContextType | undefined>(undefined);
 
 export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { activeSeller, allSellers } = useSeller();
+  const { firebaseUser, getAuthHeaders } = useAuth();
 
-  // Master switch per seller: Credit feature enabled & policy acknowledged
-  const [sellerCreditSettings, setSellerCreditSettings] = useState<Record<string, { enabled: boolean; acknowledgedAt?: string }>>(() => {
-    const saved = localStorage.getItem('grambazaar_udhari_settings');
-    return saved
-      ? JSON.parse(saved)
-      : {
-          seller_gupta_kirana: { enabled: true, acknowledgedAt: '2026-08-10T10:00:00Z' },
-          seller_sharma_dhaba: { enabled: true, acknowledgedAt: '2026-08-15T10:00:00Z' },
-        };
-  });
+  // Hydrated directly from PostgreSQL (/api/udhari/summary) when signed in
+  const [sellerCreditSettings, setSellerCreditSettings] = useState<
+    Record<string, { enabled: boolean; acknowledgedAt?: string }>
+  >({});
+  const [profiles, setProfiles] = useState<CustomerCreditProfile[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<CreditLedgerEntry[]>([]);
+  const [disputes, setDisputes] = useState<CreditDispute[]>([]);
 
-  // Customer Credit Profiles
-  const [profiles, setProfiles] = useState<CustomerCreditProfile[]>(() => {
-    const saved = localStorage.getItem('grambazaar_udhari_profiles');
-    return saved
-      ? JSON.parse(saved)
-      : [
-          {
-            id: 'prof_1',
-            sellerId: 'seller_gupta_kirana',
-            customerId: 'user_cust_1',
-            customerName: 'Ramesh Patel',
-            customerPhone: '9876543210',
-            villageName: 'Rampur',
-            status: 'ACTIVE',
-            creditLimitPaise: 250000, // ₹2,500.00
-            outstandingBalancePaise: 85000, // ₹850.00
-            availableCreditPaise: 165000, // ₹1,650.00
-            overdueAmountPaise: 0,
-            dueDays: 15,
-            lastPaymentDate: '2026-10-15T11:00:00Z',
-            internalNote: 'Pados ke nivaasi, har mahine salary aane par hisaab chukate hain.',
+  const udhariRequest = useCallback(
+    async <T,>(url: string, init: RequestInit): Promise<T | null> => {
+      try {
+        const headers = await getAuthHeaders();
+        if (!headers) return null;
+        const res = await fetch(url, {
+          ...init,
+          headers: {
+            ...headers,
+            ...(init.headers || {}),
           },
-          {
-            id: 'prof_2',
-            sellerId: 'seller_sharma_dhaba',
-            customerId: 'user_cust_1',
-            customerName: 'Ramesh Patel',
-            customerPhone: '9876543210',
-            villageName: 'Rampur',
-            status: 'ACTIVE',
-            creditLimitPaise: 150000, // ₹1,500.00
-            outstandingBalancePaise: 34000, // ₹340.00
-            availableCreditPaise: 116000, // ₹1,160.00
-            overdueAmountPaise: 0,
-            dueDays: 7,
-            lastPaymentDate: '2026-10-20T14:30:00Z',
-            internalNote: 'Regular customer for evening thali.',
-          },
-          {
-            id: 'prof_3',
-            sellerId: 'seller_gupta_kirana',
-            customerId: 'user_cust_2',
-            customerName: 'Suresh Yadav',
-            customerPhone: '9876543233',
-            villageName: 'Rampur',
-            status: 'ACTIVE',
-            creditLimitPaise: 300000, // ₹3,000.00
-            outstandingBalancePaise: 210000, // ₹2,100.00
-            availableCreditPaise: 90000, // ₹900.00
-            overdueAmountPaise: 75000, // ₹750.00 Overdue > 30 days
-            dueDays: 15,
-            lastPaymentDate: '2026-09-12T09:00:00Z',
-            internalNote: 'Reminder bhejna hai, pichle mahine ka baki hai.',
-          },
-        ];
-  });
+        });
+        if (!res.ok) return null;
+        return (await res.json()) as T;
+      } catch (error) {
+        console.error(`Udhari API request failed (${url}):`, error);
+        return null;
+      }
+    },
+    [getAuthHeaders]
+  );
 
-  // Double-Entry Immutable Ledger
-  const [ledgerEntries, setLedgerEntries] = useState<CreditLedgerEntry[]>(() => {
-    const saved = localStorage.getItem('grambazaar_udhari_ledger');
-    return saved
-      ? JSON.parse(saved)
-      : [
-          {
-            id: 'led_1',
-            ledgerReference: 'LED-2026-0012',
-            sellerId: 'seller_gupta_kirana',
-            customerId: 'user_cust_1',
-            orderId: 'GB-2026-0012',
-            entryType: 'CREDIT_SALE',
-            direction: 'INCREASES_OWED',
-            amountPaise: 135000, // ₹1,350.00
-            runningBalancePaise: 135000,
-            dueDate: '2026-10-25T00:00:00Z',
-            isOverdue: false,
-            status: 'POSTED',
-            recordedBy: 'Gupta Kirana Counter',
-            postedAt: '2026-10-10T12:00:00Z',
-          },
-          {
-            id: 'led_2',
-            ledgerReference: 'REC-2026-0045',
-            sellerId: 'seller_gupta_kirana',
-            customerId: 'user_cust_1',
-            repaymentId: 'rep_1',
-            entryType: 'REPAYMENT',
-            direction: 'DECREASES_OWED',
-            amountPaise: 50000, // ₹500.00
-            runningBalancePaise: 85000,
-            isOverdue: false,
-            status: 'POSTED',
-            reason: 'Cash paid at shop counter',
-            recordedBy: 'Gupta Kirana Owner',
-            postedAt: '2026-10-15T11:00:00Z',
-          },
-          {
-            id: 'led_3',
-            ledgerReference: 'LED-2026-0038',
-            sellerId: 'seller_sharma_dhaba',
-            customerId: 'user_cust_1',
-            orderId: 'GB-2026-0038',
-            entryType: 'CREDIT_SALE',
-            direction: 'INCREASES_OWED',
-            amountPaise: 34000, // ₹340.00
-            runningBalancePaise: 34000,
-            dueDate: '2026-11-04T00:00:00Z',
-            isOverdue: false,
-            status: 'POSTED',
-            recordedBy: 'Sharma Dhaba Cashier',
-            postedAt: '2026-10-28T19:30:00Z',
-          },
-        ];
-  });
+  const hydrateUdhari = useCallback(async () => {
+    if (!firebaseUser) {
+      setSellerCreditSettings({});
+      setProfiles([]);
+      setLedgerEntries([]);
+      setDisputes([]);
+      return;
+    }
 
-  // Disputes list
-  const [disputes, setDisputes] = useState<CreditDispute[]>(() => {
-    const saved = localStorage.getItem('grambazaar_udhari_disputes');
-    return saved ? JSON.parse(saved) : [];
-  });
+    const data = await udhariRequest<{
+      sellerCreditSettings?: Record<string, { enabled: boolean; acknowledgedAt?: string }>;
+      profiles?: CustomerCreditProfile[];
+      ledgerEntries?: CreditLedgerEntry[];
+      disputes?: CreditDispute[];
+    }>('/api/udhari/summary', { method: 'GET' });
 
-  // Sync with localStorage
-  useEffect(() => {
-    localStorage.setItem('grambazaar_udhari_settings', JSON.stringify(sellerCreditSettings));
-  }, [sellerCreditSettings]);
+    if (!data) return;
+    if (data.sellerCreditSettings) setSellerCreditSettings(data.sellerCreditSettings);
+    if (Array.isArray(data.profiles)) setProfiles(data.profiles);
+    if (Array.isArray(data.ledgerEntries)) setLedgerEntries(data.ledgerEntries);
+    if (Array.isArray(data.disputes)) setDisputes(data.disputes);
+  }, [firebaseUser, udhariRequest]);
 
   useEffect(() => {
-    localStorage.setItem('grambazaar_udhari_profiles', JSON.stringify(profiles));
-  }, [profiles]);
-
-  useEffect(() => {
-    localStorage.setItem('grambazaar_udhari_ledger', JSON.stringify(ledgerEntries));
-  }, [ledgerEntries]);
-
-  useEffect(() => {
-    localStorage.setItem('grambazaar_udhari_disputes', JSON.stringify(disputes));
-  }, [disputes]);
+    void hydrateUdhari();
+  }, [hydrateUdhari]);
 
   const isShopCreditEnabled =
     sellerCreditSettings[activeSeller.id]?.enabled ?? false;
 
   const enableShopCreditWithPolicyAcknowledgement = () => {
+    const acknowledgedAt = new Date().toISOString();
+    const targetSellerId = activeSeller.id;
     setSellerCreditSettings((prev) => ({
       ...prev,
-      [activeSeller.id]: {
+      [targetSellerId]: {
         enabled: true,
-        acknowledgedAt: new Date().toISOString(),
+        acknowledgedAt,
       },
     }));
+
+    void udhariRequest<{ setting?: { sellerCode: string; enabled: boolean; acknowledgedAt: string } }>(
+      `/api/udhari/sellers/${encodeURIComponent(targetSellerId)}/enable`,
+      { method: 'PATCH' }
+    ).then((res) => {
+      if (res?.setting) {
+        setSellerCreditSettings((prev) => ({
+          ...prev,
+          [res.setting!.sellerCode]: {
+            enabled: res.setting!.enabled,
+            acknowledgedAt: res.setting!.acknowledgedAt,
+          },
+        }));
+      } else {
+        void hydrateUdhari();
+      }
+    });
   };
 
   const getCustomerProfile = (customerId: string, sellerId: string) => {
@@ -228,6 +157,7 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     limitPaise: number,
     internalNote?: string
   ) => {
+    const tempId = `prof_${Date.now()}`;
     setProfiles((prev) => {
       const existing = prev.find((p) => p.customerId === customerId && p.sellerId === sellerId);
       if (existing) {
@@ -245,9 +175,8 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         });
       }
 
-      // Create new profile for customer at this shop
       const newProf: CustomerCreditProfile = {
-        id: `prof_${Date.now()}`,
+        id: tempId,
         sellerId,
         customerId,
         customerName: 'Customer',
@@ -263,6 +192,35 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       };
       return [...prev, newProf];
     });
+
+    void udhariRequest<{ profile?: CustomerCreditProfile }>('/api/udhari/profiles', {
+      method: 'PUT',
+      body: JSON.stringify({
+        sellerId,
+        customerId,
+        limitPaise,
+        internalNote,
+      }),
+    }).then((res) => {
+      if (res?.profile) {
+        const persisted = res.profile;
+        setProfiles((prev) => {
+          const exists = prev.some(
+            (p) => p.customerId === persisted.customerId && p.sellerId === persisted.sellerId
+          );
+          if (exists) {
+            return prev.map((p) =>
+              p.customerId === persisted.customerId && p.sellerId === persisted.sellerId
+                ? persisted
+                : p
+            );
+          }
+          return [...prev, persisted];
+        });
+      } else {
+        void hydrateUdhari();
+      }
+    });
   };
 
   const toggleCustomerCreditStatus = (
@@ -271,8 +229,28 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     status: 'ACTIVE' | 'DISABLED'
   ) => {
     setProfiles((prev) =>
-      prev.map((p) => (p.customerId === customerId && p.sellerId === sellerId ? { ...p, status } : p))
+      prev.map((p) =>
+        p.customerId === customerId && p.sellerId === sellerId ? { ...p, status } : p
+      )
     );
+
+    void udhariRequest<{ profile?: CustomerCreditProfile }>('/api/udhari/profiles/status', {
+      method: 'PATCH',
+      body: JSON.stringify({ sellerId, customerId, status }),
+    }).then((res) => {
+      if (res?.profile) {
+        const persisted = res.profile;
+        setProfiles((prev) =>
+          prev.map((p) =>
+            p.customerId === persisted.customerId && p.sellerId === persisted.sellerId
+              ? persisted
+              : p
+          )
+        );
+      } else {
+        void hydrateUdhari();
+      }
+    });
   };
 
   /**
@@ -309,10 +287,10 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const dueDate = new Date(Date.now() + dueDays * 24 * 60 * 60 * 1000).toISOString();
     const refSeq = (ledgerEntries.length + 1).toString().padStart(4, '0');
     const ledgerRef = `LED-2026-${refSeq}`;
+    const tempId = `led_${Date.now()}`;
 
-    // 1. Append immutable double-entry record
     const newEntry: CreditLedgerEntry = {
-      id: `led_${Date.now()}`,
+      id: tempId,
       ledgerReference: ledgerRef,
       sellerId,
       customerId,
@@ -329,8 +307,6 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
 
     setLedgerEntries((prev) => [newEntry, ...prev]);
-
-    // 2. Update cached customer balance atomically
     setProfiles((prev) =>
       prev.map((p) =>
         p.customerId === customerId && p.sellerId === sellerId
@@ -342,6 +318,33 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           : p
       )
     );
+
+    void udhariRequest<{
+      success?: boolean;
+      entry?: CreditLedgerEntry;
+      profile?: CustomerCreditProfile;
+    }>('/api/udhari/credit-sales', {
+      method: 'POST',
+      body: JSON.stringify({
+        sellerId,
+        customerId,
+        orderId,
+        amountPaise,
+        dueDays,
+        recordedBy: 'Order Checkout Engine',
+      }),
+    }).then((res) => {
+      if (res?.entry && res?.profile) {
+        setLedgerEntries((prev) => prev.map((e) => (e.id === tempId ? res.entry! : e)));
+        setProfiles((prev) =>
+          prev.map((p) =>
+            p.customerId === customerId && p.sellerId === sellerId ? res.profile! : p
+          )
+        );
+      } else {
+        void hydrateUdhari();
+      }
+    });
 
     return { success: true, message: 'Credit sale posted to ledger', ledgerReference: ledgerRef };
   };
@@ -373,7 +376,6 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       return { success: false, message: 'Repayment amount must be greater than zero.' };
     }
 
-    // Overpayment check
     if (amountPaise > prof.outstandingBalancePaise) {
       return {
         success: false,
@@ -385,9 +387,10 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const newOutstanding = prof.outstandingBalancePaise - amountPaise;
     const refSeq = (ledgerEntries.length + 1).toString().padStart(4, '0');
     const receiptRef = `REC-2026-${refSeq}`;
+    const tempId = `led_${Date.now()}`;
 
     const newEntry: CreditLedgerEntry = {
-      id: `led_${Date.now()}`,
+      id: tempId,
       ledgerReference: receiptRef,
       sellerId,
       customerId,
@@ -397,16 +400,16 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       runningBalancePaise: newOutstanding,
       isOverdue: false,
       status: 'POSTED',
-      reason: `${method.replace('_', ' ')} repayment recorded by seller${
-        referenceNumber ? ` (Ref: ${referenceNumber})` : ''
-      }`,
+      reason:
+        note ||
+        `${method.replace('_', ' ')} repayment recorded by seller${
+          referenceNumber ? ` (Ref: ${referenceNumber})` : ''
+        }`,
       recordedBy: activeSeller.publicName,
       postedAt: timestamp,
     };
 
     setLedgerEntries((prev) => [newEntry, ...prev]);
-
-    // Update customer profile balance
     setProfiles((prev) =>
       prev.map((p) =>
         p.customerId === customerId && p.sellerId === sellerId
@@ -419,6 +422,34 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           : p
       )
     );
+
+    void udhariRequest<{
+      success?: boolean;
+      entry?: CreditLedgerEntry;
+      profile?: CustomerCreditProfile;
+    }>('/api/udhari/repayments', {
+      method: 'POST',
+      body: JSON.stringify({
+        sellerId,
+        customerId,
+        amountPaise,
+        method,
+        referenceNumber,
+        note,
+        recordedBy: activeSeller.publicName,
+      }),
+    }).then((res) => {
+      if (res?.entry && res?.profile) {
+        setLedgerEntries((prev) => prev.map((e) => (e.id === tempId ? res.entry! : e)));
+        setProfiles((prev) =>
+          prev.map((p) =>
+            p.customerId === customerId && p.sellerId === sellerId ? res.profile! : p
+          )
+        );
+      } else {
+        void hydrateUdhari();
+      }
+    });
 
     return {
       success: true,
@@ -440,8 +471,9 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     reasonCode: 'WRONG_AMOUNT' | 'PAYMENT_NOT_RECORDED' | 'ORDER_CANCELLED' | 'OTHER';
     description: string;
   }) => {
+    const id = `disp_${Date.now()}`;
     const newDispute: CreditDispute = {
-      id: `disp_${Date.now()}`,
+      id,
       sellerId,
       customerId,
       ledgerEntryId,
@@ -452,6 +484,25 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
 
     setDisputes((prev) => [newDispute, ...prev]);
+
+    void udhariRequest<{ dispute?: CreditDispute }>('/api/udhari/disputes', {
+      method: 'POST',
+      body: JSON.stringify({
+        id,
+        sellerId,
+        customerId,
+        ledgerEntryId,
+        reasonCode,
+        description,
+      }),
+    }).then((res) => {
+      if (res?.dispute) {
+        setDisputes((prev) => prev.map((d) => (d.id === id ? res.dispute! : d)));
+      } else {
+        void hydrateUdhari();
+      }
+    });
+
     return { success: true, message: 'Dispute submitted for review.' };
   };
 
@@ -468,6 +519,20 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           : d
       )
     );
+
+    void udhariRequest<{ dispute?: CreditDispute }>(
+      `/api/udhari/disputes/${encodeURIComponent(disputeId)}/resolve`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ resolutionNote }),
+      }
+    ).then((res) => {
+      if (res?.dispute) {
+        setDisputes((prev) => prev.map((d) => (d.id === disputeId ? res.dispute! : d)));
+      } else {
+        void hydrateUdhari();
+      }
+    });
   };
 
   const getCustomerLedgersGrouped = (customerId: string) => {

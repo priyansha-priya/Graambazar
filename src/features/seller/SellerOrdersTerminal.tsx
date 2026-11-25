@@ -50,7 +50,12 @@ export const SellerOrdersTerminal: React.FC = () => {
     transitionOrder,
     extendAcceptWindow,
     markSellerNotificationsRead,
+    refreshSellerOrders,
   } = useOrders();
+
+  useEffect(() => {
+    void refreshSellerOrders(activeSeller.id);
+  }, [activeSeller.id]);
 
   // Live 1-second clock tick for Accept Countdown Timers
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
@@ -206,21 +211,31 @@ export const SellerOrdersTerminal: React.FC = () => {
       return;
     }
 
-    const runnerId = selectedRunners[order.id] || runners[0].id;
+    const runnerId = selectedRunners[order.id] || runners[0]?.id;
     const runner = runners.find((r) => r.id === runnerId) || runners[0];
-    assignRunnerToOrder(order.id, runner.id);
+    if (runner) {
+      assignRunnerToOrder(order.orderNumber, runner.id);
+    }
     transitionOrder(
       order.id,
       'out_for_delivery',
-      `Dispatched with ${runner.name} (${runner.phone})`,
+      runner
+        ? `Dispatched with ${runner.name} (${runner.phone})`
+        : 'Dispatched for village delivery',
       'SELLER',
-      {
-        assignedRunnerName: runner.name,
-        assignedRunnerPhone: runner.phone,
-      }
+      runner
+        ? {
+            assignedRunnerName: runner.name,
+            assignedRunnerPhone: runner.phone,
+          }
+        : undefined
     );
     setActiveQueueTab('DISPATCH');
-    showTerminalToast(`Order ${order.orderNumber} dispatched with ${runner.name}!`);
+    showTerminalToast(
+      runner
+        ? `Order ${order.orderNumber} dispatched with ${runner.name}!`
+        : `Order ${order.orderNumber} dispatched for delivery!`
+    );
   };
 
   const handleMarkDelivered = (order: Order) => {
@@ -925,7 +940,7 @@ export const SellerOrdersTerminal: React.FC = () => {
                               Assign In-House Delivery Runner:
                             </label>
                             <select
-                              value={selectedRunners[order.id] || runners[0].id}
+                              value={selectedRunners[order.id] || runners[0]?.id || ''}
                               onChange={(e) =>
                                 setSelectedRunners((prev) => ({
                                   ...prev,

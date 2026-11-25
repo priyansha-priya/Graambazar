@@ -3,17 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Settings,
-  Store,
-  MapPin,
-  Clock,
   QrCode,
-  Truck,
   CheckCircle,
   ShieldCheck,
   Save,
+  AlertCircle,
 } from 'lucide-react';
 import { useSeller } from '../../contexts/SellerContext';
 import { Button } from '../../components/ui/Button';
@@ -21,17 +17,69 @@ import { Badge } from '../../components/ui/Badge';
 import { Input } from '../../components/ui/Input';
 
 export const SellerSettingsView: React.FC = () => {
-  const { activeSeller } = useSeller();
+  const { activeSeller, updateSellerProfile } = useSeller();
   const [storeName, setStoreName] = useState(activeSeller.publicName);
   const [phone, setPhone] = useState(activeSeller.contactPhone || '+91 98765 43210');
-  const [upiId, setUpiId] = useState('chaudhary.dhaba@upi');
-  const [deliveryRadiusKm, setDeliveryRadiusKm] = useState(activeSeller.deliveryRadiusKm.toString());
-  const [savedToast, setSavedToast] = useState(false);
+  const [upiId, setUpiId] = useState(
+    activeSeller.upiId || `${activeSeller.id.replace(/^seller_/, '').replace(/_/g, '.')}@upi`
+  );
+  const [deliveryRadiusKm, setDeliveryRadiusKm] = useState(
+    activeSeller.deliveryRadiusKm.toString()
+  );
+  const [openingHours, setOpeningHours] = useState(
+    activeSeller.openingHoursText ||
+      `${activeSeller.operatingHours.openingTime} - ${activeSeller.operatingHours.closingTime}`
+  );
+  const [minOrderInr, setMinOrderInr] = useState(
+    Math.round(activeSeller.minimumOrderPaise / 100).toString()
+  );
+  const [packagingFeeInr, setPackagingFeeInr] = useState(
+    Math.round(activeSeller.packagingFeePaise / 100).toString()
+  );
+  const [isSaving, setIsSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null
+  );
 
-  const handleSave = (e: React.FormEvent) => {
+  // Sync form whenever seller changes or PostgreSQL profile hydrates
+  useEffect(() => {
+    setStoreName(activeSeller.publicName);
+    setPhone(activeSeller.contactPhone || '+91 98765 43210');
+    setUpiId(
+      activeSeller.upiId || `${activeSeller.id.replace(/^seller_/, '').replace(/_/g, '.')}@upi`
+    );
+    setDeliveryRadiusKm(activeSeller.deliveryRadiusKm.toString());
+    setOpeningHours(
+      activeSeller.openingHoursText ||
+        `${activeSeller.operatingHours.openingTime} - ${activeSeller.operatingHours.closingTime}`
+    );
+    setMinOrderInr(Math.round(activeSeller.minimumOrderPaise / 100).toString());
+    setPackagingFeeInr(Math.round(activeSeller.packagingFeePaise / 100).toString());
+  }, [activeSeller]);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSavedToast(true);
-    setTimeout(() => setSavedToast(false), 3000);
+    setIsSaving(true);
+    setFeedback(null);
+
+    const res = await updateSellerProfile({
+      publicName: storeName.trim(),
+      contactPhone: phone.trim(),
+      upiId: upiId.trim(),
+      deliveryRadiusKm: Math.max(1, Number(deliveryRadiusKm) || 5),
+      openingHours: openingHours.trim(),
+      minimumOrderPaise: Math.max(0, Math.round((Number(minOrderInr) || 0) * 100)),
+      packagingFeePaise: Math.max(0, Math.round((Number(packagingFeeInr) || 0) * 100)),
+    });
+
+    setIsSaving(false);
+    setFeedback({
+      type: res.success ? 'success' : 'error',
+      text: res.message,
+    });
+    if (res.success) {
+      window.setTimeout(() => setFeedback(null), 3500);
+    }
   };
 
   return (
@@ -48,10 +96,20 @@ export const SellerSettingsView: React.FC = () => {
           </p>
         </div>
 
-        {savedToast && (
-          <div className="p-2.5 px-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-[#16A34A]" />
-            <span>Settings saved successfully!</span>
+        {feedback && (
+          <div
+            className={`p-2.5 px-3 text-xs font-semibold rounded-xl flex items-center gap-2 border ${
+              feedback.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}
+          >
+            {feedback.type === 'success' ? (
+              <CheckCircle className="w-4 h-4 text-[#16A34A]" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-red-600" />
+            )}
+            <span>{feedback.text}</span>
           </div>
         )}
       </div>
@@ -87,6 +145,8 @@ export const SellerSettingsView: React.FC = () => {
             <Input
               label="Max Delivery Distance (km)"
               type="number"
+              min={1}
+              max={50}
               value={deliveryRadiusKm}
               onChange={(e) => setDeliveryRadiusKm(e.target.value)}
               helperText="How far your in-house runners can deliver"
@@ -94,9 +154,41 @@ export const SellerSettingsView: React.FC = () => {
             />
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Input
+              label="Opening Hours"
+              value={openingHours}
+              onChange={(e) => setOpeningHours(e.target.value)}
+              placeholder="08:00 AM - 09:30 PM"
+              required
+            />
+            <Input
+              label="Minimum Order (₹)"
+              type="number"
+              min={0}
+              value={minOrderInr}
+              onChange={(e) => setMinOrderInr(e.target.value)}
+              required
+            />
+            <Input
+              label="Packaging Fee (₹)"
+              type="number"
+              min={0}
+              value={packagingFeeInr}
+              onChange={(e) => setPackagingFeeInr(e.target.value)}
+              required
+            />
+          </div>
+
           <div className="pt-3 border-t border-[#E5E7EB] flex items-center justify-end">
-            <Button variant="primary" size="sm" type="submit" leftIcon={<Save className="w-3.5 h-3.5" />}>
-              Save Store Profile
+            <Button
+              variant="primary"
+              size="sm"
+              type="submit"
+              disabled={isSaving}
+              leftIcon={<Save className="w-3.5 h-3.5" />}
+            >
+              {isSaving ? 'Saving...' : 'Save Store Profile'}
             </Button>
           </div>
         </div>
