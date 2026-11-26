@@ -149,7 +149,7 @@ interface SafetyContextValue {
 const SafetyContext = createContext<SafetyContextValue | undefined>(undefined);
 
 export const SafetyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { firebaseUser, getAuthHeaders } = useAuth();
+  const { authUser, getAuthHeaders } = useAuth();
   const [profiles, setProfiles] = useState<Record<string, SellerSafetyProfile>>({});
 
   const safetyRequest = useCallback(
@@ -176,7 +176,7 @@ export const SafetyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const hydrateSafetyProfiles = useCallback(async () => {
     try {
-      if (firebaseUser) {
+      if (authUser) {
         const headers = await getAuthHeaders();
         if (headers) {
           const authRes = await fetch('/api/safety/profiles', { headers });
@@ -204,7 +204,7 @@ export const SafetyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } catch (error) {
       console.error('Failed to hydrate safety profiles from PostgreSQL:', error);
     }
-  }, [firebaseUser, getAuthHeaders]);
+  }, [authUser, getAuthHeaders]);
 
   useEffect(() => {
     void hydrateSafetyProfiles();

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Utensils,
   ShoppingBag,
@@ -160,7 +160,7 @@ type UserPortalRole = 'CUSTOMER' | 'SELLER' | 'ADMIN';
 type CustomerView = 'MARKETPLACE' | 'CART' | 'CHECKOUT' | 'ORDER_TRACKING' | 'ORDER_HISTORY' | 'MY_UDHAR';
 
 function MainMarketplaceApp() {
-  const { firebaseUser, dbProfile, authLoading, signInWithGoogle, signOutUser } = useAuth();
+  const { authUser, dbProfile, authLoading, needsPhoneVerification, signOutUser } = useAuth();
   const { activeVillage, selectedLandmark, getDeliveryRelationship } = useVillage();
   const { items: cartItems, seller: cartSeller, addItem, forceAddItem, itemSubtotalPaise } = useCart();
   const {
@@ -269,6 +269,22 @@ function MainMarketplaceApp() {
   // Authentication UI View & Logout Modal State (UI-only)
   const [authScreen, setAuthScreen] = useState<AuthScreenType | null>(null);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+
+  // Email/Google accounts need a verified mobile number before the API accepts their orders:
+  // ask once per signed-in account (they can choose "Do this later"). Not while an auth screen
+  // is open: sign-up runs its own verification step.
+  const phonePromptedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      authScreen === null &&
+      authUser &&
+      needsPhoneVerification &&
+      phonePromptedFor.current !== authUser.uid
+    ) {
+      phonePromptedFor.current = authUser.uid;
+      setAuthScreen('VERIFY_PHONE');
+    }
+  }, [authScreen, authUser, needsPhoneVerification]);
 
   // Side Drawer, All Sections Menu & Mobile Sidebar States
   const [isAllSectionsOpen, setIsAllSectionsOpen] = useState(false);
@@ -475,12 +491,15 @@ function MainMarketplaceApp() {
           portal: 'SELLER',
         }
       : {
-          name: dbProfile?.displayName || firebaseUser?.displayName || 'Ramesh Kumar',
-          identifier: firebaseUser?.email || '+91 98765 43210',
+          name: dbProfile?.displayName || authUser?.displayName || 'Ramesh Kumar',
+          identifier:
+            authUser?.email ||
+            (dbProfile?.phone ? `+91 ${dbProfile.phone}` : authUser?.phoneNumber) ||
+            '+91 98765 43210',
           roleLabel: 'Customer',
           locationLabel: activeVillage.name,
           initials: getInitials(
-            dbProfile?.displayName || firebaseUser?.displayName || 'Ramesh Kumar'
+            dbProfile?.displayName || authUser?.displayName || 'Ramesh Kumar'
           ),
           portal: 'CUSTOMER',
         };
@@ -898,7 +917,7 @@ function MainMarketplaceApp() {
                 }
               />
 
-              {(!firebaseUser ||
+              {(!authUser ||
                 !['SUPER_ADMIN', 'ADMIN_OPS', 'ADMIN_FINANCE', 'ADMIN_SUPPORT'].includes(
                   dbProfile?.role || ''
                 )) && (
@@ -906,18 +925,18 @@ function MainMarketplaceApp() {
                   <div className="flex items-start sm:items-center gap-2.5 text-xs text-amber-900">
                     <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5 sm:mt-0" />
                     <p className="font-medium">
-                      {!firebaseUser
-                        ? 'Admin Google account se sign in karein taaki sabhi changes aur private admin data save ho sakein.'
-                        : `Signed in as ${firebaseUser.email || 'user'} (${dbProfile?.role || 'CUSTOMER'}). Admin changes ke liye Super Admin account se sign in karein.`}
+                      {!authUser
+                        ? 'Admin account se sign in karein taaki sabhi changes aur private admin data save ho sakein.'
+                        : `Signed in as ${authUser.email || dbProfile?.phone || 'user'} (${dbProfile?.role || 'CUSTOMER'}). Admin changes ke liye Super Admin account se sign in karein.`}
                     </p>
                   </div>
                   <Button
                     variant="primary"
                     size="sm"
                     disabled={authLoading}
-                    onClick={() => void signInWithGoogle()}
+                    onClick={() => setAuthScreen('LOGIN')}
                   >
-                    {authLoading ? 'Signing in...' : 'Sign in with Google'}
+                    {authLoading ? 'Loading...' : authUser ? 'Switch account' : 'Sign in'}
                   </Button>
                 </div>
               )}

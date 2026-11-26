@@ -73,7 +73,7 @@ interface LiveSellerAnalytics {
 }
 
 export const SellerAnalyticsView: React.FC = () => {
-  const { firebaseUser, getAuthHeaders } = useAuth();
+  const { authUser, getAuthHeaders } = useAuth();
   const { activeSeller, allSellers, setActiveSellerId } = useSeller();
   const { orders } = useOrders();
 
@@ -89,7 +89,7 @@ export const SellerAnalyticsView: React.FC = () => {
     let active = true;
     const daysCount = timeRange === '7D' ? 7 : timeRange === '14D' ? 14 : 30;
     const loadAnalytics = async () => {
-      if (!firebaseUser) {
+      if (!authUser) {
         if (active) setLiveAnalytics(null);
         return;
       }
@@ -113,7 +113,7 @@ export const SellerAnalyticsView: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [activeSeller.id, timeRange, firebaseUser, getAuthHeaders]);
+  }, [activeSeller.id, timeRange, authUser, getAuthHeaders]);
 
   const hasLiveDbOrders = Boolean(liveAnalytics && liveAnalytics.summary.totalOrders > 0);
 

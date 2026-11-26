@@ -56,7 +56,7 @@ const UdhariContext = createContext<UdhariContextType | undefined>(undefined);
 
 export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { activeSeller, allSellers } = useSeller();
-  const { firebaseUser, getAuthHeaders } = useAuth();
+  const { authUser, getAuthHeaders } = useAuth();
 
   // Hydrated directly from PostgreSQL (/api/udhari/summary) when signed in
   const [sellerCreditSettings, setSellerCreditSettings] = useState<
@@ -89,7 +89,7 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   );
 
   const hydrateUdhari = useCallback(async () => {
-    if (!firebaseUser) {
+    if (!authUser) {
       setSellerCreditSettings({});
       setProfiles([]);
       setLedgerEntries([]);
@@ -109,7 +109,7 @@ export const UdhariProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (Array.isArray(data.profiles)) setProfiles(data.profiles);
     if (Array.isArray(data.ledgerEntries)) setLedgerEntries(data.ledgerEntries);
     if (Array.isArray(data.disputes)) setDisputes(data.disputes);
-  }, [firebaseUser, udhariRequest]);
+  }, [authUser, udhariRequest]);
 
   useEffect(() => {
     void hydrateUdhari();

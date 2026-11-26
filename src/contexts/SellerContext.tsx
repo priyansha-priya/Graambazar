@@ -75,7 +75,7 @@ const FALLBACK_RUNNERS: InHouseRunner[] = [
 ];
 
 export const SellerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { firebaseUser, getAuthHeaders } = useAuth();
+  const { authUser, getAuthHeaders } = useAuth();
 
   const [activeSellerId, setActiveSellerId] = useState<string>(() => {
     return localStorage.getItem('grambazaar_active_seller_id') || 'seller_gupta_kirana';
@@ -134,7 +134,7 @@ export const SellerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, []);
 
   const refreshSellerRunners = useCallback(async () => {
-    if (!firebaseUser) {
+    if (!authUser) {
       setRunners(FALLBACK_RUNNERS);
       return;
     }
@@ -153,7 +153,7 @@ export const SellerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     } catch (error) {
       console.error('Failed to load seller runners from PostgreSQL:', error);
     }
-  }, [activeSellerId, firebaseUser, getAuthHeaders]);
+  }, [activeSellerId, authUser, getAuthHeaders]);
 
   useEffect(() => {
     void hydrateSellerProfiles();

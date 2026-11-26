@@ -4,6 +4,9 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { AuthLayout } from './components/AuthLayout';
 import { AuthPasswordField } from './components/AuthPasswordField';
+import { PhoneOtpForm } from './components/PhoneOtpForm';
+import { useAuth } from '../../contexts/AuthContext';
+import { toIndianE164 } from '../../lib/authClient';
 import { AuthScreenType } from './types';
 
 export interface SignUpScreenProps {
@@ -19,7 +22,11 @@ interface SignUpErrors {
   password?: string;
   confirmPassword?: string;
   terms?: string;
+  form?: string;
 }
+
+/** FORM: details → VERIFY: SMS code for the mobile number → DONE */
+type SignUpStep = 'FORM' | 'VERIFY' | 'DONE';
 
 export const SignUpScreen: React.FC<SignUpScreenProps> = ({
   onChangeScreen,
@@ -33,7 +40,9 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [errors, setErrors] = useState<SignUpErrors>({});
-  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [step, setStep] = useState<SignUpStep>('FORM');
+  const [submitting, setSubmitting] = useState(false);
+  const { signUpWithEmail } = useAuth();
 
   const clearFieldError = (field: keyof SignUpErrors) => {
     if (errors[field]) {
@@ -55,18 +64,17 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
 
   const strength = getPasswordStrength(password);
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const nextErrors: SignUpErrors = {};
 
     if (!fullName.trim()) {
       nextErrors.fullName = 'Please enter your full name.';
     }
-    const digitsOnly = mobile.replace(/\D/g, '');
-    if (!digitsOnly) {
+    if (!mobile.replace(/\D/g, '')) {
       nextErrors.mobile = 'Please enter your 10-digit mobile number.';
-    } else if (digitsOnly.length < 10) {
-      nextErrors.mobile = 'Enter a valid 10-digit mobile number.';
+    } else if (!toIndianE164(mobile)) {
+      nextErrors.mobile = 'Enter a valid 10-digit Indian mobile number.';
     }
     if (!email.trim()) {
       nextErrors.email = 'Please enter your email address.';
@@ -93,7 +101,15 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
     }
 
     setErrors({});
-    setIsSubmitted(true);
+    setSubmitting(true);
+    try {
+      await signUpWithEmail(fullName, email, password);
+      setStep('VERIFY');
+    } catch (e) {
+      setErrors({ form: e instanceof Error ? e.message : 'Unable to create your account right now.' });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -106,7 +122,27 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
       onChangeScreen={onChangeScreen}
       onReturnToMarketplace={onReturnToMarketplace}
     >
-      {isSubmitted ? (
+      {step === 'VERIFY' ? (
+        <div className="space-y-5">
+          <div className="space-y-1.5 text-left">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#218838]">
+              One last step
+            </p>
+            <h1 className="auth-display text-2xl sm:text-[1.7rem] font-extrabold text-[#1F2937] tracking-tight leading-tight">
+              Verify your mobile number
+            </h1>
+            <p className="text-sm text-[#6B7280] leading-relaxed">
+              We sent a code by SMS. Shops use this number to reach you about your orders.
+            </p>
+          </div>
+          <PhoneOtpForm
+            initialMobile={mobile}
+            sendOnMount
+            verifyLabel="Verify Mobile Number"
+            onVerified={() => setStep('DONE')}
+          />
+        </div>
+      ) : step === 'DONE' ? (
         <div className="space-y-6 py-2 text-center animate-fade-in">
           <div className="w-14 h-14 rounded-full bg-[#E8F5E9] text-[#218838] flex items-center justify-center mx-auto">
             <CheckCircle2 className="w-7 h-7" />
@@ -133,15 +169,6 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
               onClick={() => onAuthComplete(`Welcome to GramBazaar, ${fullName.trim()}!`)}
             >
               Explore GramBazaar
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="md"
-              fullWidth
-              onClick={() => onChangeScreen('LOGIN')}
-            >
-              Go to Sign In
             </Button>
           </div>
         </div>
@@ -301,15 +328,18 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
               )}
             </div>
 
+            {errors.form && <p className="text-xs font-medium text-[#DC2626]">{errors.form}</p>}
+
             <div className="pt-1">
               <Button
                 type="submit"
                 variant="primary"
                 size="lg"
                 fullWidth
+                disabled={submitting}
                 rightIcon={<ArrowRight className="w-4 h-4" />}
               >
-                Create Account
+                {submitting ? 'Creating account...' : 'Create Account'}
               </Button>
             </div>
           </form>

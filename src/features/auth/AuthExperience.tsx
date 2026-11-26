@@ -3,6 +3,7 @@ import { LoginScreen } from './LoginScreen';
 import { SignUpScreen } from './SignUpScreen';
 import { ForgotPasswordScreen } from './ForgotPasswordScreen';
 import { ResetPasswordScreen } from './ResetPasswordScreen';
+import { VerifyPhoneScreen } from './VerifyPhoneScreen';
 import { AuthScreenType } from './types';
 
 export interface AuthExperienceProps {
@@ -32,6 +33,14 @@ export const AuthExperience: React.FC<AuthExperienceProps> = ({
         <ForgotPasswordScreen
           onChangeScreen={onChangeScreen}
           onReturnToMarketplace={onReturnToMarketplace}
+        />
+      );
+    case 'VERIFY_PHONE':
+      return (
+        <VerifyPhoneScreen
+          onChangeScreen={onChangeScreen}
+          onReturnToMarketplace={onReturnToMarketplace}
+          onAuthComplete={onAuthComplete}
         />
       );
     case 'RESET_PASSWORD':

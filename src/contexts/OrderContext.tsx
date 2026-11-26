@@ -1416,7 +1416,7 @@ const getInitialMockOrders = (): Order[] => {
 };
 
 export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { firebaseUser, getAuthHeaders } = useAuth();
+  const { authUser, getAuthHeaders } = useAuth();
   const [orders, setOrders] = useState<Order[]>(() => {
     const seedOrders = getInitialMockOrders();
     const saved = localStorage.getItem('grambazaar_orders');
@@ -1468,7 +1468,7 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   useEffect(() => {
     let cancelled = false;
     async function hydrateOrdersFromDb() {
-      if (!firebaseUser) return;
+      if (!authUser) return;
       try {
         const headers = await getAuthHeaders();
         if (!headers) return;
@@ -1491,7 +1491,7 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return () => {
       cancelled = true;
     };
-  }, [firebaseUser?.uid, getAuthHeaders]);
+  }, [authUser?.uid, getAuthHeaders]);
 
   const activeOrders = orders.filter((o) => !TERMINAL_ORDER_STATUSES.includes(o.status));
 

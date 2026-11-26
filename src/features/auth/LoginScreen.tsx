@@ -1,10 +1,12 @@
 import React, { FormEvent, useState } from 'react';
-import { ArrowRight, Mail } from 'lucide-react';
+import { ArrowRight, Mail, Smartphone } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useAuth } from '../../contexts/AuthContext';
 import { AuthLayout } from './components/AuthLayout';
 import { AuthPasswordField } from './components/AuthPasswordField';
+import { GoogleSignInButton } from './components/GoogleSignInButton';
+import { PhoneOtpForm } from './components/PhoneOtpForm';
 import { AuthScreenType } from './types';
 
 export interface LoginScreenProps {
@@ -13,60 +15,63 @@ export interface LoginScreenProps {
   onAuthComplete: (message: string) => void;
 }
 
+type LoginMode = 'MOBILE' | 'EMAIL';
+
 export const LoginScreen: React.FC<LoginScreenProps> = ({
   onChangeScreen,
   onReturnToMarketplace,
   onAuthComplete,
 }) => {
-  const { signInWithGoogle } = useAuth();
-  const [identifier, setIdentifier] = useState('');
+  const { signInWithEmail } = useAuth();
+  const [mode, setMode] = useState<LoginMode>('MOBILE');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const [errors, setErrors] = useState<{
-    identifier?: string;
-    password?: string;
-    google?: string;
-  }>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<{ email?: string; password?: string; form?: string }>({});
 
-  const handleGoogleSignIn = async () => {
-    setErrors((prev) => ({ ...prev, google: undefined }));
-    setGoogleLoading(true);
-    try {
-      const user = await signInWithGoogle();
-      onAuthComplete(`Welcome back, ${user.displayName || user.email || 'GramBazaar Member'}!`);
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message.includes('popup-closed-by-user')
-          ? 'Google sign-in popup was closed before completing.'
-          : 'Unable to sign in with Google right now. Please try again.';
-      setErrors((prev) => ({ ...prev, google: message }));
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
-
-  const handleSubmit = (event: FormEvent) => {
+  const handleEmailSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    const nextErrors: { identifier?: string; password?: string } = {};
-
-    if (!identifier.trim()) {
-      nextErrors.identifier = 'Please enter your mobile number or email address.';
+    const nextErrors: typeof errors = {};
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      nextErrors.email = 'Please enter a valid email address.';
     }
-    if (!password.trim()) {
+    if (!password) {
       nextErrors.password = 'Please enter your password.';
-    } else if (password.length < 6) {
-      nextErrors.password = 'Password must be at least 6 characters.';
     }
-
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       return;
     }
 
     setErrors({});
-    onAuthComplete('Welcome back to GramBazaar!');
+    setSubmitting(true);
+    try {
+      await signInWithEmail(email, password, rememberMe);
+      onAuthComplete('Welcome back to GramBazaar!');
+    } catch (e) {
+      setErrors({ form: e instanceof Error ? e.message : 'Unable to sign in right now.' });
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  const modeButton = (value: LoginMode, label: string, icon: React.ReactNode) => (
+    <button
+      type="button"
+      onClick={() => {
+        setMode(value);
+        setErrors({});
+      }}
+      className={`flex-1 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+        mode === value ? 'bg-white text-[#1F2937] shadow-sm' : 'text-[#6B7280] hover:text-[#1F2937]'
+      }`}
+      aria-pressed={mode === value}
+    >
+      {icon}
+      {label}
+    </button>
+  );
 
   return (
     <AuthLayout
@@ -88,42 +93,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             Sign in to GramBazaar
           </h1>
           <p className="text-sm text-[#6B7280] leading-relaxed">
-            Enter your mobile number or email to continue shopping from your nearby village stores.
+            Use your mobile number or email to continue shopping from your nearby village stores.
           </p>
         </div>
 
-        {/* Google Sign-In */}
-        <div className="space-y-2">
-          <button
-            type="button"
-            disabled={googleLoading}
-            onClick={handleGoogleSignIn}
-            className="w-full h-11 px-4 rounded-xl border border-[#D1D5DB] bg-white hover:bg-[#F8FAFC] text-sm font-semibold text-[#1F2937] flex items-center justify-center gap-2.5 transition-colors cursor-pointer disabled:opacity-60"
-          >
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                fill="#4285F4"
-                d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.44a5.5 5.5 0 0 1-2.39 3.61v3h3.87c2.26-2.08 3.57-5.15 3.57-8.64Z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 24c3.24 0 5.95-1.07 7.93-2.91l-3.87-3c-1.07.72-2.45 1.15-4.06 1.15-3.12 0-5.77-2.11-6.72-4.95H1.28v3.1A12 12 0 0 0 12 24Z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.28 14.29a7.2 7.2 0 0 1 0-4.58v-3.1H1.28a12 12 0 0 0 0 10.78l4-3.1Z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 4.76c1.76 0 3.34.61 4.58 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.28 6.61l4 3.1c.95-2.84 3.6-4.95 6.72-4.95Z"
-              />
-            </svg>
-            <span>{googleLoading ? 'Signing in...' : 'Continue with Google'}</span>
-          </button>
-          {errors.google && (
-            <p className="text-xs font-medium text-[#DC2626]">{errors.google}</p>
-          )}
-        </div>
+        <GoogleSignInButton />
 
         <div className="relative flex items-center">
           <div className="flex-grow border-t border-[#E5E7EB]" />
@@ -133,75 +107,85 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           <div className="flex-grow border-t border-[#E5E7EB]" />
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} noValidate className="space-y-4">
-          <Input
-            label="Mobile Number or Email"
-            name="identifier"
-            type="text"
-            autoComplete="username"
-            placeholder="e.g. 98765 43210 or name@example.com"
-            value={identifier}
-            onChange={(e) => {
-              setIdentifier(e.target.value);
-              if (errors.identifier) {
-                setErrors((prev) => ({ ...prev, identifier: undefined }));
-              }
-            }}
-            leftIcon={<Mail className="w-4 h-4" />}
-            error={errors.identifier}
-            required
+        <div className="flex gap-1 p-1 rounded-xl bg-[#F1F5F9]">
+          {modeButton('MOBILE', 'Mobile OTP', <Smartphone className="w-3.5 h-3.5" />)}
+          {modeButton('EMAIL', 'Email & Password', <Mail className="w-3.5 h-3.5" />)}
+        </div>
+
+        {mode === 'MOBILE' ? (
+          <PhoneOtpForm
+            verifyLabel="Verify & Sign In"
+            onVerified={() => onAuthComplete('Welcome to GramBazaar!')}
           />
+        ) : (
+          <form onSubmit={handleEmailSubmit} noValidate className="space-y-4">
+            <Input
+              label="Email Address"
+              name="email"
+              type="email"
+              autoComplete="email"
+              placeholder="name@example.com"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (errors.email || errors.form) setErrors((prev) => ({ ...prev, email: undefined, form: undefined }));
+              }}
+              leftIcon={<Mail className="w-4 h-4" />}
+              error={errors.email}
+              required
+            />
 
-          <AuthPasswordField
-            label="Password"
-            name="password"
-            autoComplete="current-password"
-            placeholder="Enter your password"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              if (errors.password) {
-                setErrors((prev) => ({ ...prev, password: undefined }));
-              }
-            }}
-            error={errors.password}
-            required
-          />
+            <AuthPasswordField
+              label="Password"
+              name="password"
+              autoComplete="current-password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (errors.password || errors.form) setErrors((prev) => ({ ...prev, password: undefined, form: undefined }));
+              }}
+              error={errors.password}
+              required
+            />
 
-          {/* Remember Me & Forgot Password Row */}
-          <div className="flex items-center justify-between gap-3 pt-0.5">
-            <label className="inline-flex items-center gap-2.5 text-xs font-medium text-[#4B5563] cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-4 h-4 rounded border-[#CBD5E1] text-[#218838] accent-[#218838] cursor-pointer"
-              />
-              <span>Remember me on this device</span>
-            </label>
+            {/* Remember Me & Forgot Password Row */}
+            <div className="flex items-center justify-between gap-3 pt-0.5">
+              <label className="inline-flex items-center gap-2.5 text-xs font-medium text-[#4B5563] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded border-[#CBD5E1] text-[#218838] accent-[#218838] cursor-pointer"
+                />
+                <span>Remember me on this device</span>
+              </label>
 
-            <button
-              type="button"
-              onClick={() => onChangeScreen('FORGOT_PASSWORD')}
-              className="text-xs font-semibold text-[#218838] hover:text-[#176B2C] hover:underline transition-colors cursor-pointer shrink-0"
-            >
-              Forgot Password?
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => onChangeScreen('FORGOT_PASSWORD')}
+                className="text-xs font-semibold text-[#218838] hover:text-[#176B2C] hover:underline transition-colors cursor-pointer shrink-0"
+              >
+                Forgot Password?
+              </button>
+            </div>
 
-          <div className="pt-2">
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              fullWidth
-              rightIcon={<ArrowRight className="w-4 h-4" />}
-            >
-              Sign In
-            </Button>
-          </div>
-        </form>
+            {errors.form && <p className="text-xs font-medium text-[#DC2626]">{errors.form}</p>}
+
+            <div className="pt-2">
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                fullWidth
+                disabled={submitting}
+                rightIcon={<ArrowRight className="w-4 h-4" />}
+              >
+                {submitting ? 'Signing in...' : 'Sign In'}
+              </Button>
+            </div>
+          </form>
+        )}
 
         {/* Bottom Switch Link */}
         <div className="pt-5 border-t border-[#E5E7EB] text-center">

@@ -2,7 +2,8 @@ export type AuthScreenType =
   | 'LOGIN'
   | 'SIGNUP'
   | 'FORGOT_PASSWORD'
-  | 'RESET_PASSWORD';
+  | 'RESET_PASSWORD'
+  | 'VERIFY_PHONE';
 
 export interface AuthAccountSummary {
   name: string;

@@ -584,7 +584,7 @@ function saveStored(key: string, value: unknown) {
 const AdminContext = createContext<AdminContextType | null>(null);
 
 export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { firebaseUser, getAuthHeaders } = useAuth();
+  const { authUser, getAuthHeaders } = useAuth();
 
   // Hydrated from PostgreSQL (/api/admin/rbac/summary); only active persona selector is stored locally
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(INITIAL_ADMIN_USERS);
@@ -994,7 +994,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => {
     void hydrateFromDatabase();
-  }, [hydrateFromDatabase, firebaseUser?.uid]);
+  }, [hydrateFromDatabase, authUser?.uid]);
 
   // Only active admin persona switcher preference is stored locally; RBAC users, permissions, and all platform data are persisted in PostgreSQL
   useEffect(() => { saveStored(STORAGE_KEYS.CURRENT_ADMIN_ID, currentAdminId); }, [currentAdminId]);

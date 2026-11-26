@@ -1,44 +1,47 @@
-# GramBazaar
+# GramBazaar (frontend)
 
-Rural hyperlocal marketplace platform with a React + Vite frontend and a modular Express + Drizzle ORM + PostgreSQL (`Cloud SQL`) + Firebase Admin backend.
+Rural hyperlocal marketplace: React + Vite frontend (Customer, Seller, Admin portals).
+
+The API lives in a separate project, `GramBazar/backend` (Express + Drizzle + Neon Postgres +
+Better Auth). In development the Vite server forwards every `/api` request to it, so the
+browser talks to one origin and the login cookie works without extra setup.
 
 ## Project Structure
 
 ```text
-Graambazar/
-├── src/                  # React + Vite frontend (Customer, Seller, Admin portals)
+frontend/
+├── src/                  # React app
+│   ├── contexts/         # App state; AuthContext wraps the Better Auth client
+│   ├── features/auth/    # Login (mobile OTP / email / Google), sign-up, phone verification
+│   └── lib/authClient.ts # Better Auth browser client
 ├── public/               # Static public assets
 ├── docs/                 # Database & architecture documentation
-├── backend/              # Standalone Express + Drizzle + PostgreSQL backend
-│   ├── src/              # Modular routes, middleware, Firebase Admin, DB schema & queries
-│   ├── tests/            # Node built-in API test suite (health, 404, catalog, auth guards)
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── .env.example
-│   └── README.md
-├── server.ts             # Thin preview host mounting backend/src/app.ts + Vite on port 3000
-├── package.json          # Root frontend & preview scripts
-└── README.md
+├── vite.config.ts        # Dev server on port 3000, /api proxied to the backend
+└── package.json
 ```
 
 ## Quick Start
 
-### Preview / Full-Stack Mode (Port 3000)
+Start the backend first (port 4000), then the frontend:
+
 ```bash
-npm install
-npm run dev
+cd ../backend && npm run dev     # http://localhost:4000
+cd ../frontend && npm install && npm run dev   # http://localhost:3000
 ```
 
-### Standalone Backend Mode (Port 4000)
-```bash
-cd backend
-cp .env.example .env
-npm install
-npm run dev
-```
+Set `API_PROXY_TARGET` to point the proxy at a backend on another address.
 
-### Backend Verification & Tests
+## Sign-in
+
+- **Mobile OTP**: no SMS provider is connected yet, so in development the code is printed in the
+  backend terminal (`[auth] OTP for +91...`).
+- **Email + password**, and **Google** once `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set in
+  `backend/.env`.
+- Accounts without a verified mobile number are asked to verify one; the API refuses orders until then.
+
+## Checks
+
 ```bash
-npx tsx --test backend/tests/api.test.ts
-npx tsc -p backend/tsconfig.json --noEmit
+npm run lint    # TypeScript
+npm run build   # production build
 ```
