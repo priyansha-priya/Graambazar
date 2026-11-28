@@ -48,6 +48,13 @@ town or village. This repo is the React app; the API lives in the separate `back
 - [ ] Admin screens on the new admin endpoints (after backend Phases 5–6)
 - [ ] Udhari screens — **skipped until the owner decides**
 
+## Backend shape changes to adopt
+
+- `GET /api/catalog/masters`: `packagingMasters: [records] → []`; `variantMasters` now represents `catalog_items` (UUID `id`, schema `categoryId`/`unitId`, `family_key` in `productId`, shared catalog MRP). Per-store `sellingPricePaise`, `stockQuantity`, and `lowStockThreshold` are removed from this shared catalog list; store values come from products. Consumers: `src/contexts/AdminContext.tsx`, `src/features/admin/masters/ProductVariantSizeMasterView.tsx`, `src/features/seller/components/SellerAddProductModal.tsx`, and `src/features/seller/SellerCatalogView.tsx`. `src/features/admin/masters/PackagingMasterView.tsx` must be retired or hidden.
+- `/api/admin/categories` (GET/POST/PATCH/toggle/DELETE): response envelopes and fields remain; `attributeIds` / `allowedUnitIds` change from legacy master identifiers to UUIDs in `category_attributes` / `category_units`, and `itemCount` is now computed from products. `id` and `parentId` remain category slugs. Consumers: `src/contexts/AdminContext.tsx`, `src/features/admin/masters/CategorySubcategoryMasterView.tsx`.
+- `/api/admin/products` (GET/POST/PATCH/moderate/inventory/toggle-availability/DELETE): `{ products }` / `{ product }` and DTO keys remain; `id` is now a product UUID, `categoryId` a category slug, `brandId` / `unitId` schema UUIDs, `sellerId` a seller slug; `stockQuantity` is absent when inventory is untracked. Consumers: `src/contexts/AdminContext.tsx`, `src/features/admin/AdminProductsView.tsx`, `src/features/admin/components/sellers/Seller360TabProducts.tsx`, `src/features/seller/SellerCatalogView.tsx`.
+- `/api/admin/sellers` (GET/POST/status/config/kyc-documents/kyc-changes): `{ sellers }` / `{ seller }` and DTO keys remain; `id` is the seller slug, `villageId` / `pinCode` / `serviceableVillageIds` now contain pincodes rather than village IDs, and `bankAccountNumberMasked` is reconstructed from the stored last four digits. KYC documents and activity history come from `kyc_documents` and `audit_logs`. Consumers: `src/contexts/AdminContext.tsx`, `src/features/admin/AdminSellerDirectoryView.tsx`, `src/features/admin/AdminDashboardView.tsx`, and `src/features/admin/components/sellers/Seller360Drawer.tsx`.
+
 When a phase is finished and approved, tick it here in the same commit.
 
 ## How to start a session
